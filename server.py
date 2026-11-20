@@ -131,8 +131,11 @@ def seat_tally(
         params: list = []
         if election_id:
             election = get_election_by_id(election_id)
-            if election:
-                state_list = election["states"]
+            if not election:
+                raise HTTPException(status_code=404, detail="Election not found")
+            state_list = election["states"]
+            if not state_list:
+                raise HTTPException(status_code=404, detail="Election has no associated states")
                 if len(state_list) == 1:
                     sf = "AND r.state_code = {}".format("%s" if IS_PG else "?")
                     params.append(state_list[0])
@@ -611,8 +614,11 @@ def status_summary(
             state_params.append(state)
         elif election_id:
             election = get_election_by_id(election_id)
-            if election:
-                state_list = election["states"]
+            if not election:
+                raise HTTPException(status_code=404, detail="Election not found")
+            state_list = election["states"]
+            if not state_list:
+                return {"statuses": {}, "active_states": 0, "updated_at": datetime.now().isoformat()}
                 active_state_codes = state_list
                 if len(state_list) == 1:
                     state_filter = f"AND cs.state_code = {p}"
