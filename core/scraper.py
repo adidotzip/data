@@ -477,7 +477,7 @@ def _parse_eci_constituency_html(html: str, expected_no: int) -> dict:
     if not header:
         raise ValueError("ECI page has no constituency heading (h2)")
     heading = header.get_text(" ", strip=True)
-    match = re.search(r"\\d+\\s*[-–]\\s*(.+?)(?:\\s*\\([^)]*\\))?$", heading)
+    match = re.search(r"\d+\s*[-–]\s*(.+?)(?:\s*\([^)]*\))?$", heading)
     constituency = match.group(1).strip() if match else heading.strip()
 
     table = None
