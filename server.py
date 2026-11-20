@@ -75,14 +75,17 @@ _party_symbols: Optional[dict] = None
 def _get_party_symbols() -> dict:
     global _party_symbols
     if _party_symbols is None:
+        conn = None
         try:
             conn = _connect()
             cur = _cursor(conn)
             cur.execute("SELECT abv, symbol_url FROM parties WHERE symbol_url IS NOT NULL")
             _party_symbols = {row["abv"]: row["symbol_url"] for row in cur.fetchall()}
-            conn.close()
         except Exception:
             _party_symbols = {}
+        finally:
+            if conn is not None:
+                conn.close()
     return _party_symbols
 
 
