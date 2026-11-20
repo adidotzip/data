@@ -449,36 +449,60 @@ def scrape_constituency_sync(election_identifier: str, state_code: str,
         "election_type": "",
         "election_state": ""
     }
-    
+    failed_url = None
+    source_error = None
+
     try:
         seq_no = 1
         while True:
             url = build_constituency_url(election_identifier, state_code, seq_no)
             driver.get(url)
-            
-            if "404" in driver.title:
+
+            title = (driver.title or "").lower()
+            body_text = (driver.find_element(By.TAG_NAME, "body").text or "").lower()
+            if "404" in title or "404 not found" in body_text or "page not found" in body_text:
+                failed_url = url
+                if seq_no == 1 and not results["constituencywise_results"]:
+                    source_error = "The ECI constituency results page does not exist or returned 404."
                 break
-            
+
             result = extract_results(driver)
-            if result:
+            if result and result.get("voting_tally"):
                 results["constituencywise_results"].append({
                     "source_url": url,
                     "voting_data": result
                 })
-            
+            elif seq_no == 1 and not results["constituencywise_results"]:
+                failed_url = url
+                source_error = "The page loaded, but the scraper could not recognize the results table."
+                break
+
             if respect_mode and seq_no % 10 == 0:
                 time.sleep(1)
-            
+
             if limit and seq_no >= limit:
                 break
-                
+
             seq_no += 1
-            
+
     except Exception as e:
-        print(f"Scraping error: {e}")
+        source_error = f"Scraping failed: {e}"
+        failed_url = locals().get("url")
     finally:
         driver.quit()
-    
+
+    if source_error:
+        return {
+            "error": source_error,
+            "source_url": failed_url,
+            "constituencywise_results": results["constituencywise_results"],
+        }
+    if not results["constituencywise_results"]:
+        return {
+            "error": "No constituency results were extracted from the source.",
+            "source_url": failed_url,
+            "constituencywise_results": [],
+        }
     return results
 
 def scrape_worker(election_identifier: str, state_code: str,
