@@ -17,7 +17,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from db import _connect, _cursor, IS_PG, get_elections, get_current_election, get_election_by_id
 
@@ -93,20 +93,20 @@ def _get_party_symbols() -> dict:
 # ---------------------------------------------------------------------------
 class ScrapeRequest(BaseModel):
     url: str
-    limit: int = 3
+    limit: int = Field(default=3, ge=1, le=1000)
     respect: bool = False
 
 
 class ScrapeAcRoundsRequest(BaseModel):
     url: str
-    ac_no: int
-    start_round: int = 1
+    ac_no: int = Field(ge=1)
+    start_round: int = Field(default=1, ge=1)
 
 
 class ScrapeAllRoundsRequest(BaseModel):
     url: str
-    start_ac: int = 1
-    end_ac: int = 0
+    start_ac: int = Field(default=1, ge=1)
+    end_ac: int = Field(default=0, ge=0)
     respect: bool = False
 
 
@@ -912,10 +912,10 @@ def scrape_ac_rounds_endpoint(request: ScrapeAcRoundsRequest):
             request.ac_no, request.start_round
         )
         if result.get("status") == "done":
-            return {"status": "error", "error": "AC not found (404)"}
+            raise HTTPException(status_code=404, detail="AC not found")
         return result
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        raise HTTPException(status_code=502, detail=f"Scraping failed: {e}") from e
     finally:
         driver.quit()
 
@@ -957,7 +957,7 @@ def scrape_all_rounds_endpoint(request: ScrapeAllRoundsRequest):
                 time.sleep(1)
 
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        raise HTTPException(status_code=502, detail=f"Scraping failed: {e}") from e
     finally:
         driver.quit()
 
