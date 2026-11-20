@@ -850,11 +850,6 @@ def download_dataset(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-        finally:
-            driver.quit()
-
-    return {"status": "success", "data": results}
-
 
 @app.get("/health")
 async def health_check():
