@@ -42,3 +42,7 @@ from db.sqlite import (
     upsert_constituency_status,
     upsert_election,
 )
+
+# Ensure the reference tables and schema migrations are ready on import.
+# init_db() is idempotent and also seeds states/parties from the CSV files.
+init_db()
