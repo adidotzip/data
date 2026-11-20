@@ -906,6 +906,15 @@ def scrape_endpoint(request: ScrapeRequest):
         limit=request.limit,
         respect_mode=request.respect,
     )
+    if data.get("error"):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": data["error"],
+                "source_url": data.get("source_url"),
+                "results_extracted": len(data.get("constituencywise_results", [])),
+            },
+        )
     return {"status": "success", "data": data}
 
 
