@@ -721,13 +721,22 @@ def download_dataset(
         state_names: dict[str, str] = {}
         election_name = ""
         if state:
+            cur.execute(f"SELECT state_code FROM states WHERE state_code={p}", (state,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="State not found")
             state_codes = [state]
         if election_id:
             election = get_election_by_id(election_id)
-            if election:
-                election_name = election["name"]
-                if not state:
-                    state_codes = election["states"]
+            if not election:
+                raise HTTPException(status_code=404, detail="Election not found")
+            election_name = election["name"]
+            election_states = election["states"]
+            if not election_states:
+                raise HTTPException(status_code=404, detail="Election has no associated states")
+            if state and state not in election_states:
+                raise HTTPException(status_code=400, detail="State is not part of the selected election")
+            if not state:
+                state_codes = election_states
 
         if state_codes:
             q = (
