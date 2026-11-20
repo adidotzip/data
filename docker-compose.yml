@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: election_results
       POSTGRES_USER: election_user
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +27,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://election_user:${DB_PASSWORD:-changeme}@postgres:5432/election_results
+      DATABASE_URL: postgresql://election_user:${DB_PASSWORD:?Set DB_PASSWORD in .env}@postgres:5432/election_results
       HOST: 0.0.0.0
       PORT: 8000
       LOG_LEVEL: ${LOG_LEVEL:-info}
