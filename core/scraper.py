@@ -437,72 +437,177 @@ def scrape_ac_rounds_core(driver, election_identifier: str, state_code: str,
         return {"status": "error", "error": str(e)}
 
 
+def _fetch_eci_html(url: str, timeout: int = 25) -> tuple[str, int]:
+    """Fetch ECI HTML with curl first (curl's TLS fingerprint is less likely to be blocked).
+
+    The request/session approach is adapted from the MIT-licensed
+    thecont1/india-votes-data live scraper. See upstream attribution in README.
+    """
+    import subprocess
+
+    result = subprocess.run(
+        ["curl", "-sS", "-L", "--compressed", "--max-time", str(timeout),
+         "-A", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+         "-w", "\\n__HTTP_STATUS__:%{http_code}", url],
+        capture_output=True, text=True, timeout=timeout + 5,
+    )
+    if result.returncode:
+        raise RuntimeError(f"curl failed ({result.returncode}): {result.stderr[-300:]}")
+    marker = "\\n__HTTP_STATUS__:"
+    if marker not in result.stdout:
+        raise RuntimeError("curl did not return an HTTP status marker")
+    html, status_text = result.stdout.rsplit(marker, 1)
+    return html, int(status_text.strip() or 0)
+
+
+def _parse_eci_constituency_html(html: str, expected_no: int) -> dict:
+    """Parse ECI constituency results from server-rendered HTML."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    title = soup.title.get_text(" ", strip=True) if soup.title else ""
+    body_text = soup.get_text(" ", strip=True)
+    if re.search(r"404|page not found|not found", title, re.I) or re.search(
+        r"page not found|this page is not available", body_text[:1500], re.I
+    ):
+        return {"not_found": True}
+
+    header = soup.find("h2")
+    if not header:
+        raise ValueError("ECI page has no constituency heading (h2)")
+    heading = header.get_text(" ", strip=True)
+    match = re.search(r"\\d+\\s*[-–]\\s*(.+?)(?:\\s*\\([^)]*\\))?$", heading)
+    constituency = match.group(1).strip() if match else heading.strip()
+
+    table = None
+    for candidate_table in soup.find_all("table"):
+        header_cells = [c.get_text(" ", strip=True).lower() for c in candidate_table.find_all("th")]
+        joined = " ".join(header_cells)
+        if any("candidate" in h for h in header_cells) and any("party" in h for h in header_cells):
+            table = candidate_table
+            break
+    if table is None:
+        # ECI variants sometimes omit table headers; only accept a table with
+        # candidate rows that have the expected 5+ cells and numeric vote fields.
+        for candidate_table in soup.find_all("table"):
+            if any(len(row.find_all("td")) >= 5 for row in candidate_table.find_all("tr")):
+                table = candidate_table
+                break
+    if table is None:
+        raise ValueError("No candidate results table recognized")
+
+    header_cells = [c.get_text(" ", strip=True).lower() for c in table.find_all("th")]
+    rows = []
+    for tr in table.find_all("tr"):
+        cells = [c.get_text(" ", strip=True) for c in tr.find_all("td")]
+        if len(cells) < 5:
+            continue
+        if cells[0].strip().lower() in {"total", "nota"} and cells[0].strip().lower() == "total":
+            continue
+        # Common ECI columns: serial, candidate, party, EVM, postal, total.
+        # Older variants have serial, candidate, party, EVM, postal.
+        serial, candidate, party, evm, postal = cells[:5]
+        if not candidate or not re.search(r"\\d", evm.replace(",", "")) or not re.search(
+            r"\\d", postal.replace(",", "")
+        ):
+            continue
+        rows.append({
+            "serial_no": serial.strip(),
+            "candidate": candidate.strip(),
+            "party": party.strip(),
+            "evm_votes": evm.strip().replace(",", ""),
+            "postal_votes": postal.strip().replace(",", ""),
+        })
+    if not rows:
+        raise ValueError("Results table was found but no candidate rows parsed")
+    return {"constituency_no": str(expected_no), "constituency": constituency,
+            "voting_tally": rows}
+
+
 def scrape_constituency_sync(election_identifier: str, state_code: str,
                               limit: int = None, respect_mode: bool = False) -> dict:
-    """Synchronous single-threaded scrape of constituency results."""
+    """Scrape constituency pages using curl+BeautifulSoup, with Selenium fallback.
+
+    Stops only at a confirmed 404. A blocked or unrecognized page is reported
+    as an error rather than silently treated as an end-of-results condition.
+    """
     from core.browser import create_chrome_driver
-    
-    driver = create_chrome_driver()
+
     results = {
         "constituencywise_results": [],
         "election_year": "",
         "election_type": "",
-        "election_state": ""
+        "election_state": "",
     }
     failed_url = None
     source_error = None
+    driver = None
 
     try:
         seq_no = 1
-        while True:
+        while not limit or seq_no <= limit:
             url = build_constituency_url(election_identifier, state_code, seq_no)
-            driver.get(url)
-
-            title = (driver.title or "").lower()
-            body_text = (driver.find_element(By.TAG_NAME, "body").text or "").lower()
-            if "404" in title or "404 not found" in body_text or "page not found" in body_text:
-                failed_url = url
-                if seq_no == 1 and not results["constituencywise_results"]:
-                    source_error = "The ECI constituency results page does not exist or returned 404."
-                break
-
-            result = extract_results(driver)
-            if result and result.get("voting_tally"):
+            failed_url = url
+            try:
+                html, status = _fetch_eci_html(url)
+                if status == 404:
+                    if seq_no == 1 and not results["constituencywise_results"]:
+                        source_error = "The ECI constituency results page does not exist or returned 404."
+                    break
+                if status >= 400:
+                    raise RuntimeError(f"ECI returned HTTP {status}")
+                parsed = _parse_eci_constituency_html(html, seq_no)
+                if parsed.get("not_found"):
+                    if seq_no == 1 and not results["constituencywise_results"]:
+                        source_error = "The ECI constituency results page does not exist or returned 404."
+                    break
                 results["constituencywise_results"].append({
                     "source_url": url,
-                    "voting_data": result
+                    "voting_data": parsed,
                 })
-            elif seq_no == 1 and not results["constituencywise_results"]:
-                failed_url = url
-                source_error = "The page loaded, but the scraper could not recognize the results table."
-                break
+            except Exception as primary_error:
+                # Fall back to Selenium only for an individual page fetch/parse
+                # failure. Do not mask confirmed HTTP 404s.
+                if "HTTP 404" in str(primary_error):
+                    break
+                if driver is None:
+                    driver = create_chrome_driver()
+                driver.get(url)
+                title = (driver.title or "").lower()
+                body = (driver.find_element(By.TAG_NAME, "body").text or "").lower()
+                if "404" in title or "page not found" in body:
+                    if seq_no == 1 and not results["constituencywise_results"]:
+                        source_error = "The ECI constituency results page does not exist or returned 404."
+                    break
+                fallback = extract_results(driver)
+                if not fallback.get("voting_tally"):
+                    source_error = (
+                        f"Could not parse ECI constituency page: {primary_error}; "
+                        "Selenium fallback did not recognize its results table."
+                    )
+                    break
+                results["constituencywise_results"].append({
+                    "source_url": url,
+                    "voting_data": fallback,
+                })
 
             if respect_mode and seq_no % 10 == 0:
                 time.sleep(1)
-
-            if limit and seq_no >= limit:
-                break
-
             seq_no += 1
-
     except Exception as e:
         source_error = f"Scraping failed: {e}"
-        failed_url = locals().get("url")
+        failed_url = locals().get("url", failed_url)
     finally:
-        driver.quit()
+        if driver is not None:
+            driver.quit()
 
     if source_error:
-        return {
-            "error": source_error,
-            "source_url": failed_url,
-            "constituencywise_results": results["constituencywise_results"],
-        }
+        return {"error": source_error, "source_url": failed_url,
+                "constituencywise_results": results["constituencywise_results"]}
     if not results["constituencywise_results"]:
-        return {
-            "error": "No constituency results were extracted from the source.",
-            "source_url": failed_url,
-            "constituencywise_results": [],
-        }
+        return {"error": "No constituency results were extracted from the source.",
+                "source_url": failed_url, "constituencywise_results": []}
     return results
 
 def scrape_worker(election_identifier: str, state_code: str,
