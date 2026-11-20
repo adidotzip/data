@@ -135,6 +135,10 @@ def seat_tally(
             state_list = election["states"]
             if not state_list:
                 raise HTTPException(status_code=404, detail="Election has no associated states")
+            if state and state not in state_list:
+                raise HTTPException(status_code=400, detail="State is not part of the selected election")
+            if state:
+                state_list = [state]
             if len(state_list) == 1:
                 sf = "AND r.state_code = {}".format("%s" if IS_PG else "?")
                 params.append(state_list[0])
@@ -234,10 +238,18 @@ def seat_tally(
         rows = cur.fetchall()
 
         check_q = "SELECT SUM(CASE WHEN won=1 THEN 1 ELSE 0 END) as won_count FROM constituency_status"
+        check_params: list = []
         if state:
             p = "%s" if IS_PG else "?"
             check_q += f" WHERE state_code={p}"
-        cur.execute(check_q, [state] if state else [])
+            check_params.append(state)
+        elif election_id:
+            p = "%s" if IS_PG else "?"
+            check_q += " WHERE state_code IN ({})".format(
+                ",".join([p] * len(state_list))
+            )
+            check_params.extend(state_list)
+        cur.execute(check_q, check_params)
         has_won_data = (cur.fetchone() or {}).get("won_count", 0) > 0
 
         result = []
