@@ -1,0 +1,40 @@
+[Unit]
+Description=India Votes Data API Service
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=notify
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/india-votes-data
+Environment="PATH=/opt/india-votes-data/venv/bin"
+EnvironmentFile=/opt/india-votes-data/.env
+
+# Use gunicorn with uvicorn workers for production
+ExecStart=/opt/india-votes-data/venv/bin/gunicorn server:app \
+    --workers 4 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:8000 \
+    --timeout 120 \
+    --access-logfile /var/log/india-votes-api/access.log \
+    --error-logfile /var/log/india-votes-api/error.log \
+    --log-level info
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/india-votes-data/data /var/log/india-votes-api
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

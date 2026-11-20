@@ -1,0 +1,28 @@
+WARP.md
+.poolside
+.invoke
+.hermes
+.vscode
+
+.env
+
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+uv.lock
+
+# Data and database files
+archive/
+data/form20/
+data/election_results.*
+data/india-votes-data.db
+data/json/*.d1-progress.json
+
+# Wrangler local state
+.wrangler/
+worker/.wrangler/
+worker/node_modules/

@@ -1,0 +1,67 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints
+notebooks/
+
+# Hermes (AI assistant)
+.hermes/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+data/india-votes-data.db*
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+
+# Documentation
+DEPLOYMENT.md
+LICENSE
+README.md
+FINDINGS.md
+docs/
+
+# Archives
+archive/
+
+# Deployment configs (copied explicitly)
+deploy/
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
