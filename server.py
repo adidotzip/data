@@ -188,7 +188,8 @@ def seat_tally(
                     AND r.round_no = lr.max_round
                 JOIN parties p ON r.party_abv = p.abv
                 WHERE 1=1 {sf}
-            ) WHERE rn = 1
+            ) AS ranked
+            WHERE rn = 1
         ),
         party_best AS (
             SELECT state_code, ac_no, party_abv, party_name,
@@ -214,7 +215,8 @@ def seat_tally(
                 JOIN ac_winners aw
                     ON r.state_code = aw.state_code AND r.ac_no = aw.ac_no
                 WHERE 1=1 {sf}
-            ) WHERE rn = 1
+            ) AS ranked
+            WHERE rn = 1
         )
         SELECT
             party_abv,
