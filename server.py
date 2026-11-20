@@ -1014,8 +1014,8 @@ async def health_check():
         cur = _cursor(conn)
         cur.execute("SELECT 1")
         return {"status": "healthy", "database": "connected", "timestamp": datetime.now().isoformat()}
-    except Exception:
-        return {"status": "degraded", "database": "disconnected", "timestamp": datetime.now().isoformat()}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database unavailable") from exc
     finally:
         if conn is not None:
             conn.close()
