@@ -24,7 +24,7 @@ from db import _connect, _cursor, IS_PG, get_elections, get_current_election, ge
 app = FastAPI(
     title="ECI Results Scraper API",
     description="API for scraping Election Commission of India election results",
-    version="2.0.0",
+    version="2.0.1",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -851,9 +851,23 @@ def download_dataset(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
+@app.post("/scrape")
+def scrape_endpoint(request: ScrapeRequest):
+    """Scrape constituency summary pages from a validated ECI party-wise URL."""
+    from core.scraper import parse_partywise_url, scrape_constituency_sync
+
+    try:
+        election_identifier, state_code = parse_partywise_url(request.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    data = scrape_constituency_sync(
+        election_identifier,
+        state_code,
+        limit=request.limit,
+        respect_mode=request.respect,
+    )
+    return {"status": "success", "data": data}
 
 
 @app.post("/scrape/ac-rounds")
@@ -985,8 +999,18 @@ def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    """Health and database readiness check."""
+    conn = None
+    try:
+        conn = _connect()
+        cur = _cursor(conn)
+        cur.execute("SELECT 1")
+        return {"status": "healthy", "database": "connected", "timestamp": datetime.now().isoformat()}
+    except Exception:
+        return {"status": "degraded", "database": "disconnected", "timestamp": datetime.now().isoformat()}
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 if __name__ == "__main__":
