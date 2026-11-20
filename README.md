@@ -255,12 +255,18 @@ Or follow the detailed guide: [DEPLOYMENT.md](DEPLOYMENT.md)
 ### Docker Deployment
 
 ```bash
-# Start with Docker Compose
-docker compose up -d
+# Copy the environment template and set a strong DB_PASSWORD
+cp .env.example .env
+# Edit .env and set DB_PASSWORD (generate one with: openssl rand -hex 32)
 
-# Initialize database
-docker compose exec api python -c "from db import init_db; init_db()"
+# Validate and start
+docker compose config
+docker compose up -d --build
 ```
+
+The database schema and reference tables are initialized automatically when the API imports the database package. The API container is bound to `127.0.0.1:8000`; public traffic should go through Nginx.
+
+**Existing installations:** if PostgreSQL already uses the old `changeme` password, rotate it in PostgreSQL after setting the new `DB_PASSWORD` in `.env`, before recreating the API container.
 
 See [deploy/DOCKER_DEPLOYMENT.md](deploy/DOCKER_DEPLOYMENT.md) for complete instructions.
 
@@ -274,23 +280,37 @@ All deployment configurations are in the `deploy/` directory:
 
 ## API Endpoints
 
-Once deployed, the API provides:
+The root endpoint (`GET /`) returns API metadata and endpoint paths. It is not a dashboard.
 
-- `GET /` - Live election dashboard
-- `GET /health` - Health check endpoint
-- `GET /api/elections` - List all elections
-- `GET /api/elections/current` - Get current election
-- `GET /api/states` - List all states
-- `GET /api/seat-tally?state=S22&election_id=...` - Party-wise seat counts
-- `GET /api/ac-races?state=S22` - Constituency-wise races
-- `GET /api/roundwise?state=S22` - Round-by-round progression
+- `GET /health` - API and database readiness (503 if DB is unavailable)
+- `GET /api/elections` - List configured elections
+- `GET /api/elections/current` - Most recent configured election
+- `GET /api/states` - States/UTs and ECI codes
+- `GET /api/parties` - Party metadata
+- `GET /api/seat-tally?state=S22` - Party seat tally
+- `GET /api/ac-races?state=S22` - Constituency races
+- `GET /api/roundwise?state=S22` - Round-wise progression
 - `GET /api/status?state=S22` - Counting progress
-- `GET /api/download?state=S22&election_id=...` - Download Excel dataset
-- `GET /api/parties` - Get party details
-- `GET /api/tv-channels` - Get TV channel streams
-- `POST /scrape` - Trigger scraping (see API docs)
+- `GET /api/constituency/S22/1` - One constituency's round data
+- `GET /api/download?state=S22` - Excel dataset
+- `GET /api/tv-channels` - TV channel metadata
+- `POST /scrape` - Scrape constituency summary pages
+- `POST /scrape/ac-rounds` - Scrape one AC's round-wise data
+- `POST /scrape/all-rounds` - Scrape multiple ACs
 
-Full interactive API documentation: `http://your-server:8000/docs`
+Example:
+
+```bash
+curl https://api-mvin.adi.rest/health
+curl https://api-mvin.adi.rest/api/states
+curl "https://api-mvin.adi.rest/api/seat-tally?state=S22"
+curl "https://api-mvin.adi.rest/api/ac-races?state=S22"
+curl -L "https://api-mvin.adi.rest/api/download?state=S22" -o results.xlsx
+```
+
+Election IDs currently select their configured state list. The `rounds_ac` table does not yet store an election ID, so the API cannot distinguish historical result sets for the same state.
+
+Full interactive API documentation: `https://api-mvin.adi.rest/docs`
 
 ## License
 
