@@ -25,8 +25,9 @@ import pandas as pd
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "data/india-votes-data.db")
 IS_PG = DATABASE_URL.startswith("postgresql://") or DATABASE_URL.startswith("postgres://")
-STATES_CSV = os.path.join(os.path.dirname(__file__), "data", "states.csv")
-PARTIES_CSV = os.path.join(os.path.dirname(__file__), "data", "parties.csv")
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+STATES_CSV = os.path.join(DATA_DIR, "states.csv")
+PARTIES_CSV = os.path.join(DATA_DIR, "parties.csv")
 
 if IS_PG:
     import psycopg2
@@ -107,6 +108,8 @@ CREATE TABLE IF NOT EXISTS constituency_status (
     won             INTEGER DEFAULT 0,
     form20_url      TEXT,
     form20_status   TEXT    NOT NULL DEFAULT 'UNAVAILABLE',
+    form20_score    INTEGER DEFAULT NULL,
+    form20_checked_at TEXT DEFAULT NULL,
     PRIMARY KEY (state_code, ac_no)
 );
 """
@@ -302,6 +305,20 @@ def init_db():
                     cur.execute(stmt)
         else:
             cur.executescript(ddl)
+
+        # Migrate older databases to the current verification schema.
+        if IS_PG:
+            cur.execute("ALTER TABLE constituency_status ADD COLUMN IF NOT EXISTS form20_score INTEGER DEFAULT NULL")
+            cur.execute("ALTER TABLE constituency_status ADD COLUMN IF NOT EXISTS form20_checked_at TEXT DEFAULT NULL")
+        else:
+            existing_columns = {row[1] for row in cur.execute("PRAGMA table_info(constituency_status)").fetchall()}
+            if "form20_score" not in existing_columns:
+                cur.execute("ALTER TABLE constituency_status ADD COLUMN form20_score INTEGER DEFAULT NULL")
+            if "form20_checked_at" not in existing_columns:
+                cur.execute("ALTER TABLE constituency_status ADD COLUMN form20_checked_at TEXT DEFAULT NULL")
+
+        if not os.path.isfile(STATES_CSV):
+            raise FileNotFoundError(f"States reference CSV not found: {STATES_CSV}")
 
         # Load states from CSV (ECI code as PK)
         with open(STATES_CSV, newline="") as f:
@@ -512,9 +529,11 @@ def insert_round_snapshot(
         if IS_PG:
             execute_values(
                 cur,
-                f"""INSERT INTO rounds_ac
+                """INSERT INTO rounds_ac
                    (state_code, ac_no, ac_name, round_no, candidate, party_abv, votes)
-                   VALUES %s""",
+                   VALUES %s
+                   ON CONFLICT (state_code, ac_no, round_no, candidate, party_abv)
+                   DO UPDATE SET ac_name = EXCLUDED.ac_name, votes = EXCLUDED.votes""",
                 rows,
             )
         else:
