@@ -498,26 +498,40 @@ def _parse_eci_constituency_html(html: str, expected_no: int) -> dict:
         raise ValueError("No candidate results table recognized")
 
     header_cells = [c.get_text(" ", strip=True).lower() for c in table.find_all("th")]
+    # Map columns from headings when present, falling back to the common ECI
+    # serial/candidate/party/EVM/postal order for older page variants.
+    def column_index(patterns, default):
+        for idx, label in enumerate(header_cells):
+            if any(re.search(pattern, label, re.I) for pattern in patterns):
+                return idx
+        return default
+
+    candidate_idx = column_index([r"candidate"], 1)
+    party_idx = column_index([r"party"], 2)
+    evm_idx = column_index([r"evm", r"votes.*evm"], 3)
+    postal_idx = column_index([r"postal"], 4)
+    serial_idx = column_index([r"serial", r"^s\.?n\.?$"], 0)
     rows = []
     for tr in table.find_all("tr"):
         cells = [c.get_text(" ", strip=True) for c in tr.find_all("td")]
-        if len(cells) < 5:
+        required = max(candidate_idx, party_idx, evm_idx, postal_idx)
+        if len(cells) <= required:
             continue
-        if cells[0].strip().lower() in {"total", "nota"} and cells[0].strip().lower() == "total":
+        candidate = cells[candidate_idx].strip()
+        if candidate.lower() == "total" or not candidate:
             continue
-        # Common ECI columns: serial, candidate, party, EVM, postal, total.
-        # Older variants have serial, candidate, party, EVM, postal.
-        serial, candidate, party, evm, postal = cells[:5]
-        if not candidate or not re.search(r"\\d", evm.replace(",", "")) or not re.search(
-            r"\\d", postal.replace(",", "")
-        ):
+        party = cells[party_idx].strip()
+        evm = cells[evm_idx].strip().replace(",", "")
+        postal = cells[postal_idx].strip().replace(",", "")
+        if not re.search(r"\d", evm) or not re.search(r"\d", postal):
             continue
+        serial = cells[serial_idx].strip() if serial_idx < len(cells) else str(len(rows) + 1)
         rows.append({
-            "serial_no": serial.strip(),
-            "candidate": candidate.strip(),
-            "party": party.strip(),
-            "evm_votes": evm.strip().replace(",", ""),
-            "postal_votes": postal.strip().replace(",", ""),
+            "serial_no": serial,
+            "candidate": candidate,
+            "party": party,
+            "evm_votes": evm,
+            "postal_votes": postal,
         })
     if not rows:
         raise ValueError("Results table was found but no candidate rows parsed")
