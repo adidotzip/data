@@ -601,13 +601,16 @@ def status_summary(
         p = "%s" if IS_PG else "?"
         state_filter = ""
         state_params: list = []
+        active_state_codes = None
         if state:
+            active_state_codes = [state]
             state_filter = f"AND cs.state_code = {p}"
             state_params.append(state)
         elif election_id:
             election = get_election_by_id(election_id)
             if election:
                 state_list = election["states"]
+                active_state_codes = state_list
                 if len(state_list) == 1:
                     state_filter = f"AND cs.state_code = {p}"
                     state_params.append(state_list[0])
@@ -628,9 +631,14 @@ def status_summary(
             GROUP BY effective_status
         """, state_params)
         statuses = {row["effective_status"]: row["cnt"] for row in cur.fetchall()}
+        if active_state_codes is not None:
+            active_states = len(active_state_codes)
+        else:
+            cur.execute("SELECT COUNT(DISTINCT state_code) AS cnt FROM rounds_ac")
+            active_states = (cur.fetchone() or {}).get("cnt", 0) or 0
         return {
             "statuses": statuses,
-            "active_states": 1 if state else len(statuses),
+            "active_states": active_states,
             "updated_at": datetime.now().isoformat(),
         }
     finally:
