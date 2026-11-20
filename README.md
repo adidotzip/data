@@ -315,3 +315,6 @@ Full interactive API documentation: `https://api-mvin.adi.rest/docs`
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+
+## Scraper implementation attribution\n\nThe live ECI scraping strategy (curl-first HTTP fetching, BeautifulSoup parsing, and browser fallback) was informed by the MIT-licensed [thecont1/india-votes-data](https://github.com/thecont1/india-votes-data) project. This repository contains an independent adaptation for this API and PostgreSQL-backed deployment; no database schema or stored data is copied or replaced.\n
