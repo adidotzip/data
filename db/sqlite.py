@@ -184,6 +184,8 @@ CREATE TABLE IF NOT EXISTS constituency_status (
     won             INTEGER DEFAULT 0,
     form20_url      TEXT,
     form20_status   TEXT    NOT NULL DEFAULT 'UNAVAILABLE',
+    form20_score    INTEGER DEFAULT NULL,
+    form20_checked_at TEXT DEFAULT NULL,
     PRIMARY KEY (state_code, ac_no)
 );
 """
