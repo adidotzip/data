@@ -42,7 +42,6 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 PARTY_COLORS = {
     "BJP": "#FF6B00",
-    "INC": "#00BFFF",
     "DMK": "#FF0000",
     "AIADMK": "#008000",
     "AITC": "#00FF7F",
@@ -136,16 +135,16 @@ def seat_tally(
             state_list = election["states"]
             if not state_list:
                 raise HTTPException(status_code=404, detail="Election has no associated states")
-                if len(state_list) == 1:
-                    sf = "AND r.state_code = {}".format("%s" if IS_PG else "?")
-                    params.append(state_list[0])
-                    params.append(state_list[0])
-                else:
-                    sf = "AND r.state_code IN ({})".format(
-                        ",".join(["%s"] * len(state_list)) if IS_PG else ",".join(["?"] * len(state_list))
-                    )
-                    params.extend(state_list)
-                    params.extend(state_list)
+            if len(state_list) == 1:
+                sf = "AND r.state_code = {}".format("%s" if IS_PG else "?")
+                params.append(state_list[0])
+                params.append(state_list[0])
+            else:
+                sf = "AND r.state_code IN ({})".format(
+                    ",".join(["%s"] * len(state_list)) if IS_PG else ",".join(["?"] * len(state_list))
+                )
+                params.extend(state_list)
+                params.extend(state_list)
         elif state:
             sf = "AND r.state_code = {}".format("%s" if IS_PG else "?")
             params.append(state)
@@ -999,7 +998,7 @@ def root():
     """API root - provides information about available endpoints."""
     return {
         "name": "ECI Results Scraper API",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "description": "API for Election Commission of India election results",
         "docs": "/docs",
         "redoc": "/redoc",
