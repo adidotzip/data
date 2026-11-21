@@ -453,7 +453,8 @@ def ac_races(state: str = Query(..., description="State code (required)")):
 
         # Compute status for each AC based on actual data
         for ac in ac_map.values():
-            cands = ac['candidates']            total_votes = ac['total_votes']
+            cands = ac['candidates']
+            total_votes = ac['total_votes']
             n_candidates = len(cands)
             # DONE criteria: votes > 0 and >1 candidate (counting rounds, not 999)
             if total_votes > 0 and n_candidates > 1:
