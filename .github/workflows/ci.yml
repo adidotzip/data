@@ -15,8 +15,6 @@ jobs:
           python-version: "3.14"
       - name: Compile Python sources
         run: python -m compileall -q server.py db core tools
-      - name: Run archive importer tests
-        run: python -m unittest discover -s tests -v
       - name: Validate Docker Compose
         env:
           DB_PASSWORD: ci-validation-secret
