@@ -127,6 +127,23 @@ class ScrapeAllRoundsRequest(BaseModel):
     respect: bool = False
 
 
+def _require_current_live_election(election: dict) -> None:
+    """Reject historical election metadata for endpoints backed by live rounds tables.
+
+    Historical candidate-level data is served by /api/archive/results. The live
+    rounds tables are not election-ID scoped, so filtering them by state alone
+    would incorrectly present current results as historical results.
+    """
+    elections = get_elections()
+    latest_sort_date = max((str(item.get("sort_date", "")) for item in elections), default="")
+    election_sort_date = str(election.get("sort_date", ""))
+    if not latest_sort_date or election_sort_date[:4] != latest_sort_date[:4]:
+        raise HTTPException(
+            status_code=400,
+            detail="Historical elections cannot be queried through live endpoints. Use /api/archive/results.",
+        )
+
+
 # ---------------------------------------------------------------------------
 # API Endpoints
 # ---------------------------------------------------------------------------
@@ -149,6 +166,7 @@ def seat_tally(
             election = get_election_by_id(election_id)
             if not election:
                 raise HTTPException(status_code=404, detail="Election not found")
+            _require_current_live_election(election)
             state_list = election["states"]
             if not state_list:
                 raise HTTPException(status_code=404, detail="Election has no associated states")
@@ -638,27 +656,31 @@ def status_summary(
         state_filter = ""
         state_params: list = []
         active_state_codes = None
-        if state:
-            active_state_codes = [state]
-            state_filter = f"AND cs.state_code = {p}"
-            state_params.append(state)
-        elif election_id:
+        if election_id:
             election = get_election_by_id(election_id)
             if not election:
                 raise HTTPException(status_code=404, detail="Election not found")
+            _require_current_live_election(election)
             state_list = election["states"]
             if not state_list:
                 return {"statuses": {}, "active_states": 0, "updated_at": datetime.now().isoformat()}
-                active_state_codes = state_list
-                if len(state_list) == 1:
-                    state_filter = f"AND cs.state_code = {p}"
-                    state_params.append(state_list[0])
-                else:
-                    state_filter = "AND cs.state_code IN ({})".format(
-                        ",".join(["%s"] * len(state_list)) if IS_PG
-                        else ",".join(["?"] * len(state_list))
-                    )
-                    state_params.extend(state_list)
+            if state and state not in state_list:
+                raise HTTPException(status_code=400, detail="State is not part of the selected election")
+            active_state_codes = [state] if state else state_list
+            filter_codes = [state] if state else state_list
+            if len(filter_codes) == 1:
+                state_filter = f"AND cs.state_code = {p}"
+                state_params.append(filter_codes[0])
+            else:
+                state_filter = "AND cs.state_code IN ({})".format(
+                    ",".join(["%s"] * len(filter_codes)) if IS_PG
+                    else ",".join(["?"] * len(filter_codes))
+                )
+                state_params.extend(filter_codes)
+        elif state:
+            active_state_codes = [state]
+            state_filter = f"AND cs.state_code = {p}"
+            state_params.append(state)
 
         cur.execute(f"""
             SELECT
@@ -759,6 +781,7 @@ def download_dataset(
             election = get_election_by_id(election_id)
             if not election:
                 raise HTTPException(status_code=404, detail="Election not found")
+            _require_current_live_election(election)
             election_name = election["name"]
             election_states = election["states"]
             if not election_states:
