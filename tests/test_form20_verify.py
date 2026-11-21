@@ -289,8 +289,7 @@ class TestReconcile:
             tesseract_votes=182609,
             llm_votes=182609,
             llm_confirmed=True,
-            llm_name_visible="llm_name_visible="yes",
-        )".split('"')[1],
+            llm_name_visible="yes",
             is_in_top3=True,
         )
         assert result["confidence"] == "high"
@@ -303,8 +302,7 @@ class TestReconcile:
             tesseract_votes=None,
             llm_votes=182609,
             llm_confirmed=True,
-            llm_name_visible="llm_name_visible="yes",
-        )".split('"')[1],
+            llm_name_visible="yes",
             is_in_top3=True,
         )
         assert result["confidence"] == "high"
@@ -317,8 +315,7 @@ class TestReconcile:
             tesseract_votes=None,
             llm_votes=63472,
             llm_confirmed=False,
-            llm_name_visible="llm_name_visible="yes",
-        )".split('"')[1],
+            llm_name_visible="yes",
             is_in_top3=True,
         )
         assert result["confidence"] == "medium"
@@ -331,8 +328,7 @@ class TestReconcile:
             tesseract_votes=None,
             llm_votes=95432,
             llm_confirmed=True,
-            llm_name_visible="llm_name_visible="partial",
-        )".split('"')[1],
+            llm_name_visible="partial",
             is_in_top3=True,
         )
         assert result["confidence"] == "medium"
@@ -344,8 +340,7 @@ class TestReconcile:
             tesseract_votes=None,
             llm_votes=None,
             llm_confirmed=None,
-            llm_name_visible="llm_name_visible="no",
-        )".split('"')[1],
+            llm_name_visible="no",
             is_in_top3=True,
         )
         assert result["confidence"] == "low"
@@ -357,8 +352,7 @@ class TestReconcile:
             tesseract_votes=50000,
             llm_votes=50000,
             llm_confirmed=False,
-            llm_name_visible="llm_name_visible="yes",
-        )".split('"')[1],
+            llm_name_visible="yes",
             is_in_top3=True,
         )
         assert result["confidence"] == "low"
