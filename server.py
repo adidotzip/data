@@ -943,7 +943,7 @@ def scrape_all_configured_endpoint(request: ScrapeAllConfiguredRequest):
         raise HTTPException(status_code=503, detail="No valid ECI source URLs are configured in election.conf.")
 
     reports = []
-    totals = {"sources": len(urls), "scraped_constituencies": 0, "ingested_constituencies": 0, "candidate_snapshots_written": 0}
+    totals = {"sources": len(urls), "scraped_constituencies": 0, "ingested_constituencies": 0, "candidate_snapshots_written": 0, "failed_sources": 0}
     for url in urls:
         report = {"url": url}
         try:
@@ -954,24 +954,30 @@ def scrape_all_configured_endpoint(request: ScrapeAllConfiguredRequest):
                 cur = _cursor(conn)
                 try:
                     ingestion = ingest_final_results(scraped, conn, cur, IS_PG)
+                    report["ingestion"] = ingestion
+                    totals["ingested_constituencies"] += ingestion.get("constituencies_ingested", 0)
+                    totals["candidate_snapshots_written"] += ingestion.get("candidate_snapshots_written", 0)
                 except Exception as exc:
                     conn.rollback()
                     report["ingestion_error"] = str(exc)
                 finally:
                     conn.close()
-                if "ingestion" in locals():
-                    report["ingestion"] = ingestion
-                    totals["ingested_constituencies"] += ingestion.get("constituencies_ingested", 0)
-                    totals["candidate_snapshots_written"] += ingestion.get("candidate_snapshots_written", 0)
-                    del ingestion
             totals["scraped_constituencies"] += report.get("scraped", 0) or 0
-            report["status"] = "success" if report.get("scraped") else "failed"
+            report["status"] = "success" if report.get("scraped") and not report.get("ingestion_error") else "failed"
         except Exception as exc:
             report["status"] = "failed"
             report["error"] = str(exc)
+        if report["status"] != "success":
+            totals["failed_sources"] += 1
         reports.append(report)
 
-    return {"status": "success" if totals["ingested_constituencies"] else "partial_failure", "summary": totals, "sources": reports}
+    if totals["failed_sources"] == 0:
+        overall_status = "success"
+    elif totals["ingested_constituencies"] > 0:
+        overall_status = "partial_failure"
+    else:
+        overall_status = "failed"
+    return {"status": overall_status, "summary": totals, "sources": reports}
 
 
 @app.post("/scrape/ac-rounds")
