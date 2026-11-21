@@ -1,6 +1,6 @@
 import unittest
 
-from core.supplemental_importer import _norm, _state_code
+from core.supplemental_importer import _norm, _state_code, _supplemental_event_id
 
 
 class SupplementalImporterTests(unittest.TestCase):
@@ -21,6 +21,19 @@ class SupplementalImporterTests(unittest.TestCase):
 
     def test_normalization(self):
         self.assertEqual(_norm("  Jammu & Kashmir "), "jammu and kashmir")
+
+    def test_same_state_year_by_elections_get_distinct_ids(self):
+        ids = {
+            _supplemental_event_id(2021, "KA", "KA-AC-2021-01"),
+            _supplemental_event_id(2021, "KA", "KA-AC-2021-02"),
+        }
+        self.assertEqual(len(ids), 2)
+
+    def test_event_id_is_stable_and_safe(self):
+        first = _supplemental_event_id(2021, "KA", "By-election: AC 12 / 2021")
+        second = _supplemental_event_id(2021, "KA", "By-election: AC 12 / 2021")
+        self.assertEqual(first, second)
+        self.assertNotIn("/", first)
 
 
 if __name__ == "__main__":

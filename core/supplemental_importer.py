@@ -1,13 +1,15 @@
 """Import supplemental historical assembly election coverage from a public Parquet archive.
 
-Existing archive rows are never overwritten. The importer fills missing candidate rows
-using the existing election ID when a state/year is already represented; otherwise it
-uses a stable supplemental election ID. Source provenance is recorded in source_url.
+Existing archive rows are never overwritten. Each source election event is kept
+separate, including by-elections held in the same state and year. Rows are merged into
+an existing archive event only when the source event ID exactly matches it.
 """
 from __future__ import annotations
 
 import csv
+import hashlib
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -76,6 +78,15 @@ def _state_code(value: Any) -> str | None:
     return STATE_ALIASES.get(_norm(value))
 
 
+def _supplemental_event_id(year: int, state_code: str, source_event: Any) -> str:
+    """Build a deterministic event ID that distinguishes same-year by-elections."""
+    source = str(source_event or f"{year}-{state_code}").strip()
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", source).strip("-").upper() or "EVENT"
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:10].upper()
+    slug = f"{slug[:37]}-{digest}"
+    return f"SUPP-AC-{year}-{state_code}-{slug}"
+
+
 def _download_source() -> Path:
     if CACHE_PATH.exists() and CACHE_PATH.stat().st_size > 100_000:
         return CACHE_PATH
@@ -122,7 +133,7 @@ def import_supplemental_archive(conn, cursor, is_pg: bool, *,
     finally:
         ddb.close()
 
-    existing_events: dict[tuple[str, int], str] = {}
+    existing_events: set[tuple[str, int, str]] = set()
     cursor.execute(
         "SELECT state_code, election_year, election_id FROM historical_assembly_results "
         "GROUP BY state_code, election_year, election_id"
@@ -131,8 +142,7 @@ def import_supplemental_archive(conn, cursor, is_pg: bool, *,
         d = dict(row) if hasattr(row, "keys") else {
             "state_code": row[0], "election_year": row[1], "election_id": row[2]
         }
-        key = (str(d["state_code"]).upper(), int(d["election_year"]))
-        existing_events.setdefault(key, str(d["election_id"]))
+        existing_events.add((str(d["state_code"]).upper(), int(d["election_year"]), str(d["election_id"])))
 
     grouped: dict[tuple[str, int, str], list[tuple]] = {}
     skipped_unmapped = 0
@@ -162,8 +172,9 @@ def import_supplemental_archive(conn, cursor, is_pg: bool, *,
             skipped_invalid += 1
             continue
         source_event = str(_column(item, "election_id", "event_id", default=f"{election_year}-{state_code}") or f"{election_year}-{state_code}")
-        existing_id = existing_events.get((state_code, election_year))
-        normalized_id = existing_id or f"SUPP-AC-{election_year}-{state_code}"
+        # Merge only on exact source-event identity. State/year alone would collapse by-elections.
+        exact_existing = (state_code, election_year, source_event)
+        normalized_id = source_event if exact_existing in existing_events else _supplemental_event_id(election_year, state_code, source_event)
         source_url = f"{SOURCE_REPOSITORY} (Parquet source: {SOURCE_URL}; source election ID: {source_event})"
         key = (state_code, election_year, normalized_id)
         grouped.setdefault(key, []).append((
@@ -177,7 +188,7 @@ def import_supplemental_archive(conn, cursor, is_pg: bool, *,
     missing_events = 0
     for (state_code, election_year, normalized_id), rows in sorted(grouped.items()):
         acs = len({r[3] for r in rows})
-        existing = (state_code, election_year) in existing_events
+        existing = (state_code, election_year, normalized_id) in existing_events
         summary_events.append({
             "state_code": state_code, "election_year": election_year,
             "election_id": normalized_id, "constituencies": acs,
