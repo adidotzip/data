@@ -369,6 +369,32 @@ Use `--dry-run` to scrape only the first three constituencies.
 
 Historical archive output is currently file-based. The production PostgreSQL schema does not have an election_id dimension in rounds_ac, so historical elections must not be inserted into the current counting-round table until a migration adds election separation. No migration or data reset is performed by this branch.
 
+### Import the repository's historical state datasets
+
+The repository includes archived ECI candidate-result JSON datasets for 20 state/UT election datasets covering 2022–2026. These are imported into the additive `historical_assembly_results` table, **not** into `rounds_ac` or `constituency_status`, so historical imports cannot overwrite live counting data.
+
+Preview the available archive import without writing:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/archive/import \\
+  -H 'Content-Type: application/json' \\
+  -d '{"dry_run":true}'
+```
+
+Import all archive files idempotently:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/archive/import \\
+  -H 'Content-Type: application/json' \\
+  -d '{}'
+```
+
+Optional filters: `state` (standard two-letter code) and `year`. The import is additive/upsert-only and does not delete existing records.
+
+Historical API:
+- `GET /api/archive/elections` — imported dataset coverage by election/state.
+- `GET /api/archive/results?state=TN&year=2026` — candidate vote totals for a state/year. Supports `election_id`, `ac_no`, `limit` (max 10,000), and `offset`.
+
 ### Coverage boundaries
 
 - The configured bulk endpoint processes only the source URLs in election.conf.
