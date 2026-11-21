@@ -299,6 +299,12 @@ def init_db():
     conn = _connect()
     cur = _cursor(conn)
     try:
+        # Serialize schema initialization across Gunicorn workers. Without this,
+        # concurrent CREATE TABLE IF NOT EXISTS can race in PostgreSQL catalog
+        # creation (pg_type uniqueness violation) during process startup.
+        if IS_PG:
+            cur.execute("SELECT pg_advisory_xact_lock(184632791, 1)")
+
         ddl = _DDL_PG if IS_PG else _DDL_SQLITE
         if IS_PG:
             for stmt in ddl.strip().split(";"):
