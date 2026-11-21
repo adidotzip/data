@@ -318,3 +318,60 @@ MIT — see [LICENSE](LICENSE).
 
 
 ## Scraper implementation attribution\n\nThe live ECI scraping strategy (curl-first HTTP fetching, BeautifulSoup parsing, and browser fallback) was informed by the MIT-licensed [thecont1/india-votes-data](https://github.com/thecont1/india-votes-data) project. This repository contains an independent adaptation for this API and PostgreSQL-backed deployment; no database schema or stored data is copied or replaced.\n
+
+## ECI Scraping and Ingestion Pipeline
+
+The API scraper now discovers constituency numbers from the actual ECI party-wise source page (hidden constituency-list inputs and real constituency links), instead of assuming ACs are numbered sequentially until a guessed 404. It fetches each discovered constituency page, validates candidate rows, and writes idempotent database snapshots:
+
+- **Round 998:** final EVM-only totals
+- **Round 999:** EVM + postal totals (the final-result snapshot)
+- constituency_status is updated after successful ingestion.
+- Unknown parties are inserted into parties with a stable abbreviation; existing party aliases are matched first.
+- A failed/empty scrape is not reported as success and does not write scraped results.
+
+### Scrape one configured or supplied source
+
+POST /scrape retains the existing request shape. limit is the maximum constituencies to scrape (default 3), respect enables sequential respectful fetching.
+
+### Scrape all configured ECI sources
+
+POST /scrape/all-configured scrapes every validated party-wise URL in election.conf and ingests successful sources independently. It returns a per-source report and totals. This covers only URLs currently configured in election.conf; it is not a claim of complete historical ECI archive coverage.
+
+Example request:
+
+```json
+{
+  "limit_per_state": 1000,
+  "respect": true
+}
+```
+
+### Roundwise ingestion
+
+POST /scrape/ac-rounds and POST /scrape/all-rounds now persist round snapshots to rounds_ac, along with final 998/999 snapshots when final/postal data is available. Writes use the existing natural-key conflict handling and preserve the database; no destructive migrations or data resets are performed.
+
+### Run tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+### Historical ECI archive scraping
+
+Use the separate archive scraper for legacy ECI HTML preserved by the Internet Archive. It incrementally writes CSV and JSON output and resumes by constituency number:
+
+```bash
+python scripts/eci_archive_scraper.py "ARCHIVE.ORG_URL_FOR_CONSTITUENCY_1" \
+  --election-id AC-2023 --state-code KA --output-dir data/archive
+```
+
+Use `--dry-run` to scrape only the first three constituencies.
+
+Historical archive output is currently file-based. The production PostgreSQL schema does not have an election_id dimension in rounds_ac, so historical elections must not be inserted into the current counting-round table until a migration adds election separation. No migration or data reset is performed by this branch.
+
+### Coverage boundaries
+
+- The configured bulk endpoint processes only the source URLs in election.conf.
+- The archive CLI supports historical archive.org ECI pages and writes resumable CSV/JSON.
+- Form 20 verification remains a separate validation workflow and is not yet automated by this change.
+

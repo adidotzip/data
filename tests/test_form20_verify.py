@@ -290,6 +290,7 @@ class TestReconcile:
             llm_votes=182609,
             llm_confirmed=True,
             llm_name_visible="yes",
+            is_in_top3=True,
         )
         assert result["confidence"] == "high"
         assert result["delta"] == 0
@@ -302,6 +303,7 @@ class TestReconcile:
             llm_votes=182609,
             llm_confirmed=True,
             llm_name_visible="yes",
+            is_in_top3=True,
         )
         assert result["confidence"] == "high"
         assert result["delta"] == 0
@@ -314,6 +316,7 @@ class TestReconcile:
             llm_votes=63472,
             llm_confirmed=False,
             llm_name_visible="yes",
+            is_in_top3=True,
         )
         assert result["confidence"] == "medium"
         assert result["delta"] == -206
@@ -326,6 +329,7 @@ class TestReconcile:
             llm_votes=95432,
             llm_confirmed=True,
             llm_name_visible="partial",
+            is_in_top3=True,
         )
         assert result["confidence"] == "medium"
 
@@ -337,6 +341,7 @@ class TestReconcile:
             llm_votes=None,
             llm_confirmed=None,
             llm_name_visible="no",
+            is_in_top3=True,
         )
         assert result["confidence"] == "low"
 
@@ -348,6 +353,7 @@ class TestReconcile:
             llm_votes=50000,
             llm_confirmed=False,
             llm_name_visible="yes",
+            is_in_top3=True,
         )
         assert result["confidence"] == "low"
         assert abs(result["delta"]) > 0

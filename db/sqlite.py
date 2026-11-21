@@ -313,7 +313,7 @@ def init_db():
             cur.execute("ALTER TABLE constituency_status ADD COLUMN IF NOT EXISTS form20_score INTEGER DEFAULT NULL")
             cur.execute("ALTER TABLE constituency_status ADD COLUMN IF NOT EXISTS form20_checked_at TEXT DEFAULT NULL")
         else:
-            existing_columns = {row[1] for row in cur.execute("PRAGMA table_info(constituency_status)").fetchall()}
+            existing_columns = {row["name"] for row in cur.execute("PRAGMA table_info(constituency_status)").fetchall()}
             if "form20_score" not in existing_columns:
                 cur.execute("ALTER TABLE constituency_status ADD COLUMN form20_score INTEGER DEFAULT NULL")
             if "form20_checked_at" not in existing_columns:
