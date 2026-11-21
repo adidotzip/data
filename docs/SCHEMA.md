@@ -173,16 +173,11 @@ The ECI uses its own coding scheme for states:
 
 Full mapping in `data/states.csv`.
 
-## Bye-Elections
+## Bye-Elections and election isolation
 
-Handled naturally by the `round_no` time axis:
+The historical archive table preserves distinct event IDs and is the supported source for past candidate-level results.
 
-1. General election: rounds 1-7, candidate X wins (`won=1`)
-2. Bye-election: round 8, candidate Y wins (`won=1` for Y, `won=0` for X)
-3. `constituency_status.current_round` auto-updates via `GREATEST()`
-4. History preserved — X's data remains in round 7, Y's in round 8
-
-No schema changes needed. The scraper writes new rows; the dashboard reads the latest.
+The live `rounds_ac` table does **not** contain an `election_id` column. Therefore it cannot safely represent multiple elections for the same constituency as separate events. Live endpoints reject election metadata from older years and direct historical requests to `/api/archive/results`. A future live by-election architecture needs an explicit election/event key and a reviewed migration; do not treat higher `round_no` values as sufficient election identity.
 
 ## Backends
 
@@ -196,4 +191,4 @@ DATABASE_URL="data/india-votes-data.db"
 DATABASE_URL="postgresql://localhost:5432/election_results"
 ```
 
-`db_utils.py` auto-detects the backend via `_IS_PG` flag. SQL uses `?` (SQLite) or `%s` (PostgreSQL) via `_placeholder()`.
+`db/sqlite.py` auto-detects the backend via `IS_PG`. SQL uses `?` (SQLite) or `%s` (PostgreSQL) via `_placeholder()`.
