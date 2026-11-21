@@ -139,7 +139,7 @@ def _current_live_elections() -> list[dict]:
         if str(item.get("election_id", "")).startswith("AC-")
         and isinstance(item.get("states"), list)
         and item.get("states")
-        and all(re.fullmatch(r"[SU]\\d{2}", str(code)) for code in item["states"])
+        and all(re.fullmatch(r"[SU]\d{2}", str(code)) for code in item["states"])
     ]
     latest_year = max(
         (str(item.get("sort_date", ""))[:4] for item in general_elections),
