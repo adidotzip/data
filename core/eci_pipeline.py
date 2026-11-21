@@ -229,3 +229,86 @@ def ingest_final_results(source_result: dict[str, Any], conn, cursor, is_pg: boo
 
     conn.commit()
     return {"constituencies_ingested": processed_acs, "candidate_snapshots_written": inserted_candidates}
+
+
+def ingest_round_results(state_code: str, ac_no: int, ac_name: str, rounds: list,
+                        postal_votes: list, conn, cursor, is_pg: bool) -> dict[str, int]:
+    """Persist round snapshots and final EVM / EVM+postal snapshots idempotently."""
+    placeholder = "%s" if is_pg else "?"
+    cursor.execute("SELECT abv, name, aliases FROM parties")
+    existing = [dict(row) if hasattr(row, "keys") else {"abv": row[0], "name": row[1], "aliases": row[2]} for row in cursor.fetchall()]
+    written = 0
+    latest_by_candidate: dict[tuple[str, str], int] = {}
+    latest_round = 0
+    for round_data in sorted(rounds or [], key=lambda item: int(item.get("round", 0))):
+        round_no = int(round_data.get("round") or 0)
+        if round_no <= 0 or round_no >= 998:
+            continue
+        latest_round = max(latest_round, round_no)
+        snapshot: list[tuple[str, str, int]] = []
+        for candidate in round_data.get("tally", []):
+            name = str(candidate.get("candidate") or "").strip()
+            party_raw = str(candidate.get("party") or "").strip()
+            if not name:
+                continue
+            votes = _votes(candidate.get("total"))
+            abv = _party_abv(party_raw, existing)
+            if not any(str(row.get("abv") or "").casefold() == abv.casefold() for row in existing):
+                cursor.execute(f"INSERT INTO parties (abv, name) VALUES ({placeholder}, {placeholder}) ON CONFLICT (abv) DO NOTHING", (abv, party_raw or abv))
+                existing.append({"abv": abv, "name": party_raw or abv, "aliases": ""})
+            snapshot.append((name, abv, votes))
+            latest_by_candidate[(name, abv)] = votes
+        for name, abv, votes in snapshot:
+            cursor.execute(
+                f"""INSERT INTO rounds_ac (state_code, ac_no, ac_name, round_no, candidate, party_abv, votes)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                ON CONFLICT (state_code, ac_no, round_no, candidate, party_abv)
+                DO UPDATE SET ac_name = EXCLUDED.ac_name, votes = EXCLUDED.votes""",
+                (state_code, ac_no, ac_name, round_no, name, abv, votes),
+            )
+            written += 1
+
+    if latest_by_candidate:
+        for (name, abv), evm_votes in latest_by_candidate.items():
+            cursor.execute(
+                f"""INSERT INTO rounds_ac (state_code, ac_no, ac_name, round_no, candidate, party_abv, votes)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, 998, {placeholder}, {placeholder}, {placeholder})
+                ON CONFLICT (state_code, ac_no, round_no, candidate, party_abv)
+                DO UPDATE SET ac_name = EXCLUDED.ac_name, votes = EXCLUDED.votes""",
+                (state_code, ac_no, ac_name, name, abv, evm_votes),
+            )
+            written += 1
+
+    postal_by_candidate: dict[tuple[str, str], int] = {}
+    for row in postal_votes or []:
+        name = str(row.get("candidate") or "").strip()
+        party_raw = str(row.get("party") or "").strip()
+        if not name:
+            continue
+        abv = _party_abv(party_raw, existing)
+        postal_by_candidate[(name, abv)] = _votes(row.get("postal_votes"))
+    for (name, abv), evm_votes in latest_by_candidate.items():
+        final_votes = evm_votes + postal_by_candidate.get((name, abv), 0)
+        cursor.execute(
+            f"""INSERT INTO rounds_ac (state_code, ac_no, ac_name, round_no, candidate, party_abv, votes)
+            VALUES ({placeholder}, {placeholder}, {placeholder}, 999, {placeholder}, {placeholder}, {placeholder})
+            ON CONFLICT (state_code, ac_no, round_no, candidate, party_abv)
+            DO UPDATE SET ac_name = EXCLUDED.ac_name, votes = EXCLUDED.votes""",
+            (state_code, ac_no, ac_name, name, abv, final_votes),
+        )
+        written += 1
+
+    status = "DONE" if postal_votes else "LIVE"
+    current_round = latest_round or 0
+    won_flag = 1 if postal_votes else 0
+    cursor.execute(
+        f"""INSERT INTO constituency_status (state_code, ac_no, ac_name, status, current_round, total_rounds, error_count, won)
+        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, 0, {placeholder})
+        ON CONFLICT (state_code, ac_no)
+        DO UPDATE SET ac_name = EXCLUDED.ac_name, status = EXCLUDED.status,
+            current_round = EXCLUDED.current_round, total_rounds = EXCLUDED.total_rounds,
+            error_count = 0, won = EXCLUDED.won""",
+        (state_code, ac_no, ac_name, status, current_round, latest_round, won_flag),
+    )
+    conn.commit()
+    return {"round_snapshots_written": written, "latest_round": latest_round, "status": status}
