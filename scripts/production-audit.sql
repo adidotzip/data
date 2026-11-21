@@ -22,6 +22,15 @@ FROM historical_assembly_results
 GROUP BY election_id, election_year
 ORDER BY election_year DESC, election_id;
 
+\echo '=== Election metadata states that do not match ECI state primary keys (review) ==='
+SELECT e.election_id, e.name, code AS metadata_state_code,
+       s.state_code_std, s.state_name
+FROM elections e
+CROSS JOIN LATERAL jsonb_array_elements_text(e.states::jsonb) AS codes(code)
+LEFT JOIN states s ON s.state_code = code
+WHERE s.state_code IS NULL
+ORDER BY e.sort_date DESC, e.election_id, code;
+
 \echo '=== Archive event IDs present in live elections metadata (review) ==='
 SELECT e.election_id, e.name, e.states, e.sort_date,
        COUNT(h.*) AS matching_archive_rows
