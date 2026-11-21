@@ -22,16 +22,13 @@ FROM historical_assembly_results
 GROUP BY election_id, election_year
 ORDER BY election_year DESC, election_id;
 
-\echo '=== Metadata missing for historical event IDs ==='
-SELECT h.election_id,
-       MIN(h.election_year) AS election_year,
-       STRING_AGG(DISTINCT h.state_code, '/' ORDER BY h.state_code) AS states,
-       COUNT(*) AS candidate_rows
-FROM historical_assembly_results h
-LEFT JOIN elections e ON e.election_id = h.election_id
-WHERE e.election_id IS NULL
-GROUP BY h.election_id
-ORDER BY election_year DESC, h.election_id;
+\echo '=== Archive event IDs present in live elections metadata (review) ==='
+SELECT e.election_id, e.name, e.states, e.sort_date,
+       COUNT(h.*) AS matching_archive_rows
+FROM elections e
+JOIN historical_assembly_results h ON h.election_id = e.election_id
+GROUP BY e.election_id, e.name, e.states, e.sort_date
+ORDER BY e.sort_date DESC, e.election_id;
 
 \echo '=== Metadata records with no historical result rows ==='
 SELECT e.election_id, e.name, e.states, e.sort_date
