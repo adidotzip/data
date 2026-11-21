@@ -159,7 +159,7 @@ Quick reference (row counts vary by deployment):
 |-------|---------|
 | `states` | State/UT reference data |
 | `parties` | Party metadata + aliases |
-| `elections` | Election metadata for selector and API |
+| `elections` | Current live election metadata (ECI state codes) |
 | `rounds_ac` | Live counting-round snapshots, not election-ID scoped |
 | `rounds_pc` | Reserved/live parliamentary counting data |
 | `constituency_status` | Live AC lifecycle tracking |
