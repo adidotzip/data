@@ -992,6 +992,21 @@ def scrape_ac_rounds_endpoint(request: ScrapeAcRoundsRequest):
         )
         if result.get("status") == "done":
             raise HTTPException(status_code=404, detail="AC not found")
+        if result.get("status") == "success" and result.get("data"):
+            from core.eci_pipeline import ingest_round_results
+            data = result["data"]
+            conn = _connect()
+            cur = _cursor(conn)
+            try:
+                result["ingestion"] = ingest_round_results(
+                    state_code, request.ac_no, data.get("constituency", f"AC-{request.ac_no}"),
+                    data.get("rounds", []), data.get("postal_votes", []), conn, cur, IS_PG,
+                )
+            except Exception as exc:
+                conn.rollback()
+                raise HTTPException(status_code=500, detail=f"Scrape succeeded but ingestion failed: {exc}") from exc
+            finally:
+                conn.close()
         return result
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Scraping failed: {e}") from e
@@ -1003,6 +1018,7 @@ def scrape_ac_rounds_endpoint(request: ScrapeAcRoundsRequest):
 def scrape_all_rounds_endpoint(request: ScrapeAllRoundsRequest):
     from core.browser import create_chrome_driver
     from core.scraper import build_constituency_url, parse_partywise_url, scrape_ac_rounds_core
+    from core.eci_pipeline import ingest_round_results
 
     try:
         election_identifier, state_code = parse_partywise_url(request.url)
@@ -1031,7 +1047,21 @@ def scrape_all_rounds_endpoint(request: ScrapeAllRoundsRequest):
             if result.get("status") == "done":
                 break
             if result.get("status") == "success":
-                results.append(result.get("data", {}))
+                data = result.get("data", {})
+                conn = _connect()
+                cur = _cursor(conn)
+                try:
+                    ingestion = ingest_round_results(
+                        state_code, ac_no, data.get("constituency", f"AC-{ac_no}"),
+                        data.get("rounds", []), data.get("postal_votes", []), conn, cur, IS_PG,
+                    )
+                    data["ingestion"] = ingestion
+                except Exception as exc:
+                    conn.rollback()
+                    data["ingestion_error"] = str(exc)
+                finally:
+                    conn.close()
+                results.append(data)
             if request.respect and ac_no % 10 == 0:
                 time.sleep(1)
 
