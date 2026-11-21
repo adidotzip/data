@@ -108,6 +108,12 @@ class ArchiveImportRequest(BaseModel):
     dry_run: bool = False
 
 
+class SupplementalArchiveImportRequest(BaseModel):
+    state: Optional[str] = Field(default=None, description="Two-letter standard state code")
+    year: Optional[int] = Field(default=None, ge=1951, le=2100)
+    dry_run: bool = True
+
+
 class ScrapeAcRoundsRequest(BaseModel):
     url: str
     ac_no: int = Field(ge=1)
@@ -999,6 +1005,26 @@ def import_archive_endpoint(request: ArchiveImportRequest):
     except Exception as exc:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Historical archive import failed: {exc}") from exc
+    finally:
+        conn.close()
+
+
+@app.post("/archive/import-supplemental")
+def import_supplemental_archive_endpoint(request: SupplementalArchiveImportRequest):
+    """Preview or import missing historical assembly rows from the supplemental Parquet source."""
+    from core.supplemental_importer import import_supplemental_archive
+
+    conn = _connect()
+    cur = _cursor(conn)
+    try:
+        result = import_supplemental_archive(
+            conn, cur, IS_PG, state=request.state, year=request.year,
+            dry_run=request.dry_run,
+        )
+        return {"status": "dry_run" if request.dry_run else "success", "summary": result}
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Supplemental historical import failed: {exc}") from exc
     finally:
         conn.close()
 
