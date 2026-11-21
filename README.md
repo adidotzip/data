@@ -163,19 +163,19 @@ Quick reference (row counts vary by deployment):
 | `rounds_ac` | Live counting-round snapshots, not election-ID scoped |
 | `rounds_pc` | Reserved/live parliamentary counting data |
 | `constituency_status` | Live AC lifecycle tracking |
-| `historical_assembly_results` | Historical candidate-level assembly results, isolated from live tables | |
+| `historical_assembly_results` | Historical candidate-level assembly results, isolated from live tables |
 
 
 ### Production database audit (read-only)
 
-Run the PostgreSQL audit from the repository root on the server. It contains only SELECT statements and reports missing election metadata, duplicate keys, vote-total inconsistencies, invalid rows, and archive coverage.
+Run the PostgreSQL audit from the repository root on the server. It contains only SELECT statements and reports table counts, archive coverage, suspicious live election metadata, duplicate keys, vote-total inconsistencies, invalid rows, and constituency coverage.
 
 
 ```bash
 sudo docker compose exec -T postgres psql -U election_user -d election_results -f - < scripts/production-audit.sql
 ```
 
-Expected clean checks return no rows for missing metadata, duplicates, or invalid vote totals. Review any non-empty output before making database changes.
+Expected clean checks return no rows for duplicate keys or invalid vote totals. Metadata and coverage sections are review reports, not automatic error classifications. Review any suspicious output before making database changes.
 
 ## Scraping Strategy
 
