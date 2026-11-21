@@ -127,6 +127,47 @@ class ScrapeAllRoundsRequest(BaseModel):
     respect: bool = False
 
 
+def _current_live_elections() -> list[dict]:
+    """Return only current-year general assembly elections for live endpoints.
+
+    Archive metadata may also exist in the elections table. Historical data has
+    its own /api/archive/elections and /api/archive/results endpoints.
+    """
+    elections = get_elections()
+    general_elections = [
+        item for item in elections
+        if str(item.get("election_id", "")).startswith("AC-")
+        and isinstance(item.get("states"), list)
+        and item.get("states")
+        and all(re.fullmatch(r"[SU]\d{2}", str(code)) for code in item["states"])
+    ]
+    latest_year = max(
+        (str(item.get("sort_date", ""))[:4] for item in general_elections),
+        default="",
+    )
+    if not latest_year:
+        return []
+    return sorted(
+        [item for item in general_elections if str(item.get("sort_date", ""))[:4] == latest_year],
+        key=lambda item: (str(item.get("sort_date", "")), str(item.get("election_id", ""))),
+        reverse=True,
+    )
+
+
+def _require_current_live_election(election: dict) -> None:
+    """Reject elections not exposed by the live selector.
+
+    Live rounds are not election-ID scoped, so only the current general election
+    metadata is permitted. Historical and by-election data use the archive API.
+    """
+    current_ids = {str(item.get("election_id", "")) for item in _current_live_elections()}
+    if str(election.get("election_id", "")) not in current_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Historical and by-election events cannot be queried through live endpoints. Use /api/archive/results.",
+        )
+
+
 # ---------------------------------------------------------------------------
 # API Endpoints
 # ---------------------------------------------------------------------------
@@ -149,6 +190,7 @@ def seat_tally(
             election = get_election_by_id(election_id)
             if not election:
                 raise HTTPException(status_code=404, detail="Election not found")
+            _require_current_live_election(election)
             state_list = election["states"]
             if not state_list:
                 raise HTTPException(status_code=404, detail="Election has no associated states")
@@ -638,27 +680,31 @@ def status_summary(
         state_filter = ""
         state_params: list = []
         active_state_codes = None
-        if state:
-            active_state_codes = [state]
-            state_filter = f"AND cs.state_code = {p}"
-            state_params.append(state)
-        elif election_id:
+        if election_id:
             election = get_election_by_id(election_id)
             if not election:
                 raise HTTPException(status_code=404, detail="Election not found")
+            _require_current_live_election(election)
             state_list = election["states"]
             if not state_list:
                 return {"statuses": {}, "active_states": 0, "updated_at": datetime.now().isoformat()}
-                active_state_codes = state_list
-                if len(state_list) == 1:
-                    state_filter = f"AND cs.state_code = {p}"
-                    state_params.append(state_list[0])
-                else:
-                    state_filter = "AND cs.state_code IN ({})".format(
-                        ",".join(["%s"] * len(state_list)) if IS_PG
-                        else ",".join(["?"] * len(state_list))
-                    )
-                    state_params.extend(state_list)
+            if state and state not in state_list:
+                raise HTTPException(status_code=400, detail="State is not part of the selected election")
+            active_state_codes = [state] if state else state_list
+            filter_codes = [state] if state else state_list
+            if len(filter_codes) == 1:
+                state_filter = f"AND cs.state_code = {p}"
+                state_params.append(filter_codes[0])
+            else:
+                state_filter = "AND cs.state_code IN ({})".format(
+                    ",".join(["%s"] * len(filter_codes)) if IS_PG
+                    else ",".join(["?"] * len(filter_codes))
+                )
+                state_params.extend(filter_codes)
+        elif state:
+            active_state_codes = [state]
+            state_filter = f"AND cs.state_code = {p}"
+            state_params.append(state)
 
         cur.execute(f"""
             SELECT
@@ -707,17 +753,15 @@ def constituency_rounds(state_code: str, ac_no: int):
 # ---------------------------------------------------------------------------
 @app.get("/api/elections")
 def list_elections():
-    """List all elections ordered by sort_date descending."""
-    return {"elections": get_elections()}
+    """List current-year general elections available to live endpoints."""
+    return {"elections": _current_live_elections()}
 
 
 @app.get("/api/elections/current")
 def current_election():
-    """Get the current (most recent) election."""
-    election = get_current_election()
-    if not election:
-        return {"election": None}
-    return {"election": election}
+    """Get the most recent current-year general election."""
+    elections = _current_live_elections()
+    return {"election": elections[0] if elections else None}
 
 
 @app.get("/api/states")
@@ -759,6 +803,7 @@ def download_dataset(
             election = get_election_by_id(election_id)
             if not election:
                 raise HTTPException(status_code=404, detail="Election not found")
+            _require_current_live_election(election)
             election_name = election["name"]
             election_states = election["states"]
             if not election_states:
