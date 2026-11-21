@@ -1035,22 +1035,43 @@ def scrape_all_rounds_endpoint(request: ScrapeAllRoundsRequest):
     results = []
 
     try:
+        ac_numbers = None
         if request.end_ac == 0:
-            max_ac = 0
-            for i in range(1, 1000):
-                test_url = build_constituency_url(election_identifier, state_code, i)
-                driver.get(test_url)
-                if "404" in driver.title:
-                    break
-                max_ac = i
-        else:
-            max_ac = request.end_ac
+            try:
+                from core.eci_pipeline import _fetch_html, discover_constituencies
+                partywise_html = _fetch_html(request.url)
+                discovered = discover_constituencies(partywise_html, state_code)
+                if discovered:
+                    ac_numbers = [item["ac_no"] for item in discovered]
+            except Exception:
+                ac_numbers = None
 
-        for ac_no in range(request.start_ac, max_ac + 1):
+        if ac_numbers is None:
+            # Fallback only when ECI's source page did not expose a constituency list.
+            if request.end_ac == 0:
+                max_ac = 0
+                for i in range(1, 1000):
+                    test_url = build_constituency_url(election_identifier, state_code, i)
+                    driver.get(test_url)
+                    if "404" in driver.title:
+                        break
+                    max_ac = i
+            else:
+                max_ac = request.end_ac
+            ac_numbers = list(range(request.start_ac, max_ac + 1))
+        else:
+            ac_numbers = [no for no in ac_numbers if no >= request.start_ac]
+            if request.end_ac:
+                ac_numbers = [no for no in ac_numbers if no <= request.end_ac]
+
+        for ac_no in ac_numbers:
             result = scrape_ac_rounds_core(
                 driver, election_identifier, state_code, ac_no, 1
             )
             if result.get("status") == "done":
+                if ac_numbers and ac_numbers[0] == request.start_ac:
+                    # Discovered list means an unavailable AC is skipped, not an end marker.
+                    continue
                 break
             if result.get("status") == "success":
                 data = result.get("data", {})
