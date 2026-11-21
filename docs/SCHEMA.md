@@ -177,7 +177,7 @@ Full mapping in `data/states.csv`.
 
 The historical archive table preserves distinct event IDs and is the supported source for past candidate-level results.
 
-The live `rounds_ac` table does **not** contain an `election_id` column. Therefore it cannot safely represent multiple elections for the same constituency as separate events. Live endpoints reject election metadata from older years and direct historical requests to `/api/archive/results`. A future live by-election architecture needs an explicit election/event key and a reviewed migration; do not treat higher `round_no` values as sufficient election identity.
+The live `rounds_ac` table does **not** contain an `election_id` column. Therefore it cannot safely represent multiple elections for the same constituency as separate events. Live endpoints accept only current-year general-election IDs (`AC-…`) and reject historical or by-election IDs. Historical candidate-level queries use `/api/archive/results`. A future live by-election architecture needs an explicit election/event key and a reviewed migration; do not treat higher `round_no` values as sufficient election identity.
 
 ## Backends
 
