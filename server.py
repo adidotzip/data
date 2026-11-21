@@ -447,8 +447,7 @@ def ac_races(state: str = Query(..., description="State code (required)")):
 
         # Compute status for each AC based on actual data
         for ac in ac_map.values():
-            cands = ac['candidates']
-            total_votes = ac['total_votes']
+            cands = ac['candidates']            total_votes = ac['total_votes']
             n_candidates = len(cands)
             # DONE criteria: votes > 0 and >1 candidate (counting rounds, not 999)
             if total_votes > 0 and n_candidates > 1:
@@ -897,8 +896,7 @@ def download_dataset(
 
     return StreamingResponse(
         buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 @app.post("/scrape")
@@ -1035,10 +1033,8 @@ def historical_archive_results(
     year: int = Query(default=None, ge=1951, le=2100),
     election_id: str = Query(default=None),
     ac_no: int = Query(default=None, ge=1),
-    limit: int = Query(default=500, ge=1, le=10000),
-    offset: int = Query(default=0, ge=0),
 ):
-    """Read historical candidate results without touching live rounds data."""
+    """Read all matching historical candidate results without touching live rounds data."""
     conn = _connect()
     cur = _cursor(conn)
     try:
@@ -1064,11 +1060,11 @@ def historical_archive_results(
             f"""SELECT election_id, election_year, state_code, ac_no, ac_name,
                        candidate, party_name, evm_votes, postal_votes, total_votes, source_url
                 FROM historical_assembly_results{where}
-                ORDER BY election_year DESC, state_code, ac_no, total_votes DESC, candidate
-                LIMIT {p} OFFSET {p}""",
-            params + [limit, offset],
+                ORDER BY election_year DESC, state_code, ac_no, total_votes DESC, candidate""",
+            params,
         )
-        return {"results": cur.fetchall(), "total": total, "limit": limit, "offset": offset}
+        results = cur.fetchall()
+        return {"results": results, "total": total}
     finally:
         conn.close()
 
@@ -1273,4 +1269,3 @@ if __name__ == "__main__":
         uvicorn.run(app, host="0.0.0.0", port=8000)
     else:
         print("Use cli.py for command-line scraping, or run with --api flag.")
-
