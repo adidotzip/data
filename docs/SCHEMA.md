@@ -1,6 +1,6 @@
 # Database Schema
 
-India Votes Data uses a normalized SQLite or PostgreSQL database. The schema is managed by `db_utils.py` and is version-agnostic — the same DDL works on both backends.
+India Votes Data uses a normalized SQLite or PostgreSQL database. The current schema is defined in `db/sqlite.py` and supports both backends. Historical assembly results are stored separately from live counting rounds.
 
 ## Tables
 
@@ -22,7 +22,7 @@ Reference table for states and union territories. ECI codes are the primary key 
 | `loksabha_seats` | INTEGER | Lok Sabha constituencies |
 | `rajyasabha_seats` | INTEGER | Rajya Sabha seats |
 
-**36 rows** (28 states + 8 UTs).
+Reference data is seeded from `data/states.csv` during database initialization.
 
 ### parties
 
@@ -44,9 +44,44 @@ Party metadata with normalization support. The `aliases` column holds variant sp
 | `wikipedia_url` | TEXT | Wikipedia link |
 | `alliance` | TEXT | Alliance/coalition name |
 
-**196 rows** (30 from ECI CSV + 166 auto-generated from scraped data).
+Party rows are seeded from the repository data and may be supplemented by scraping/normalization workflows. Avoid treating a fixed row count as authoritative.
 
 **Party normalization chain**: exact match → case-insensitive → aliases → raw name. Built into `_normalize_party()`.
+
+### elections
+
+Election metadata used by the election selector and API.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `election_id` | TEXT PK | Stable event identifier |
+| `name` | TEXT | Display name |
+| `states` | TEXT | JSON array of state codes |
+| `sort_date` | TEXT | Sort key for election ordering |
+
+Metadata must correspond to available data. Live endpoints backed by `rounds_ac` are not election-ID scoped; they reject historical election metadata and direct historical queries to the archive API.
+
+### historical_assembly_results
+
+Historical candidate-level assembly results, separate from the live counting tables.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `election_id` | TEXT | Source election/event identifier |
+| `election_year` | INTEGER | Election year |
+| `state_code` | TEXT | Standard state/UT code |
+| `ac_no` | INTEGER | Constituency number |
+| `ac_name` | TEXT | Constituency name |
+| `candidate` | TEXT | Candidate name |
+| `party_name` | TEXT | Party label as recorded by source |
+| `evm_votes` | INTEGER | EVM votes |
+| `postal_votes` | INTEGER | Postal votes |
+| `total_votes` | INTEGER | EVM + postal total |
+| `source_url` | TEXT | Source/provenance text |
+
+**Primary key**: `(election_id, state_code, ac_no, candidate, party_name)`
+
+An index supports filtering by state and election year. Use `GET /api/archive/elections` for coverage and `GET /api/archive/results` for historical candidate results.
 
 ### rounds_ac
 
@@ -64,10 +99,10 @@ Vote counts per candidate per counting round. This is the core data table. The c
 
 **Primary key**: `(state_code, ac_no, round_no, candidate, party_abv)`
 
-**209,171 rows** (May 2026 elections: Assam, Kerala, Puducherry, Tamil Nadu, West Bengal).
+Row counts are deployment-specific and change as data is scraped. `rounds_ac` is live-round data and is not election-ID scoped.
 
 **Design decisions**:
-- `round_no` IS the time axis. Once declared, a round's results don't change. New rounds (including bye-elections) are just new rows with higher round_no.
+- `round_no` records counting-round snapshots. This table is not keyed by `election_id`, so it must not be used to present historical elections as if it were election-specific. Historical candidate-level results use `historical_assembly_results`.
 - No `id` column — the composite PK is the natural key.
 - No `election_type` — the table name tells you it's Assembly data.
 - No `scraped_at` — `round_no` is the temporal ordering.
@@ -88,7 +123,7 @@ Reserved for Parliamentary Constituency (Lok Sabha) results. Same schema shape a
 
 **Primary key**: `(state_code, pc_no, round_no, candidate, party_abv)`
 
-**0 rows** (schema ready, data collection pending).
+Row counts are deployment-specific.
 
 ### constituency_status
 
@@ -109,7 +144,7 @@ Lifecycle tracking per Assembly Constituency. Updated by the scraper as counting
 
 **Primary key**: `(state_code, ac_no)`
 
-**4,123 rows** (all ACs across 36 states/UTs, initially PENDING).
+Rows are seeded from state/constituency reference data and updated as live scraping proceeds.
 
 ## Relationships
 
@@ -119,6 +154,8 @@ states.state_code ←── rounds_pc.state_code
 states.state_code ←── constituency_status.state_code
 parties.abv       ←── rounds_ac.party_abv
 parties.abv       ←── rounds_pc.party_abv
+
+historical_assembly_results is keyed by election, state, constituency, candidate, and party; it is intentionally separate from live-round tables.
 ```
 
 ## ECI State Codes
