@@ -12,7 +12,7 @@ Scrapes constituency-wise election results — candidate names, party affiliatio
 - **Dual database backend** — SQLite (local) or PostgreSQL via `DATABASE_URL`
 - **Normalized schema** — states, parties, rounds_ac, constituency_status ([schema docs](docs/SCHEMA.md))
 - **Live dashboard** — FastAPI + Chart.js with seat tally, striped bars (leading) vs solid (declared), auto-refresh
-- **By-election support** — round_no is the time axis; new elections are just new rounds
+- **Historical archive** — historical candidate-level results are stored separately from live counting snapshots
 - **CSV/JSON export** — optional file output alongside database writes
 
 ## Setup
@@ -83,6 +83,11 @@ uv run uvicorn server:app --reload
 
 Endpoints:
 - `GET /health` — Health check
+- `GET /api/elections` and `/api/elections/current` — Election metadata
+- `GET /api/archive/elections` — Historical archive coverage
+- `GET /api/archive/results` — Historical candidate-level results (state, year, election, AC filters; pagination)
+- `POST /archive/import` — Preview/import committed ECI archive JSON
+- `POST /archive/import-supplemental` — Preview/import third-party supplemental archive (dry-run by default)
 - `POST /scrape` — Scrape constituency results from party-wise URL
 - `POST /scrape/ac-rounds` — Scrape all rounds for a single AC
 - `POST /scrape/all-rounds` — Scrape all rounds for all ACs
@@ -148,14 +153,17 @@ india-votes-data/
 
 See [docs/SCHEMA.md](docs/SCHEMA.md) for full schema documentation.
 
-Quick reference — 4 tables:
+Quick reference (row counts vary by deployment):
 
-| Table | Rows | Purpose |
-|-------|------|---------|
-| `states` | 36 | Reference data (ECI codes as PK) |
-| `parties` | 196 | Party metadata + aliases |
-| `rounds_ac` | 209K | Vote counts per candidate per round |
-| `constituency_status` | 4K | AC lifecycle tracking |
+| Table | Purpose |
+|-------|---------|
+| `states` | State/UT reference data |
+| `parties` | Party metadata + aliases |
+| `elections` | Election metadata for selector and API |
+| `rounds_ac` | Live counting-round snapshots, not election-ID scoped |
+| `rounds_pc` | Reserved/live parliamentary counting data |
+| `constituency_status` | Live AC lifecycle tracking |
+| `historical_assembly_results` | Historical candidate-level assembly results, isolated from live tables | |
 
 ## Scraping Strategy
 
