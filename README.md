@@ -355,3 +355,23 @@ POST /scrape/ac-rounds and POST /scrape/all-rounds now persist round snapshots t
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+### Historical ECI archive scraping
+
+Use the separate archive scraper for legacy ECI HTML preserved by the Internet Archive. It incrementally writes CSV and JSON output and resumes by constituency number:
+
+```bash
+python scripts/eci_archive_scraper.py "ARCHIVE.ORG_URL_FOR_CONSTITUENCY_1" \
+  --election-id AC-2023 --state-code KA --output-dir data/archive
+```
+
+Use `--dry-run` to scrape only the first three constituencies.
+
+Historical archive output is currently file-based. The production PostgreSQL schema does not have an election_id dimension in rounds_ac, so historical elections must not be inserted into the current counting-round table until a migration adds election separation. No migration or data reset is performed by this branch.
+
+### Coverage boundaries
+
+- The configured bulk endpoint processes only the source URLs in election.conf.
+- The archive CLI supports historical archive.org ECI pages and writes resumable CSV/JSON.
+- Form 20 verification remains a separate validation workflow and is not yet automated by this change.
+
