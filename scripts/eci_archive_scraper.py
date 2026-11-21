@@ -113,8 +113,9 @@ def run_archive_scrape(archive_url: str, election_id: str, state_code: str,
         raise ValueError("Archive URL must point to a legacy ECI Constituencywise page")
     eci_election = match.group(1)
     raw_code = match.group(2)
+    state_eci_code = raw_code[:3]
     first_html = fetch_archive_html(archive_raw_url(prefix, original))
-    acs = discover_legacy_acs(first_html, raw_code)
+    acs = discover_legacy_acs(first_html, state_eci_code)
     if not acs:
         raise ValueError("Could not discover historical constituency list from archive page")
     if dry_run:
@@ -147,7 +148,7 @@ def run_archive_scrape(archive_url: str, election_id: str, state_code: str,
         no = ac["ac_no"]
         if no in already:
             continue
-        eci_url = f"https://results.eci.gov.in/{eci_election}/Constituencywise{raw_code}{no}.htm?ac={no}"
+        eci_url = f"https://results.eci.gov.in/{eci_election}/Constituencywise{state_eci_code}{no}.htm?ac={no}"
         raw_url = archive_raw_url(prefix, eci_url)
         try:
             page = fetch_archive_html(raw_url)
