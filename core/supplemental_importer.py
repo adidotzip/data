@@ -82,9 +82,8 @@ def _supplemental_event_id(year: int, state_code: str, source_event: Any) -> str
     """Build a deterministic event ID that distinguishes same-year by-elections."""
     source = str(source_event or f"{year}-{state_code}").strip()
     slug = re.sub(r"[^A-Za-z0-9]+", "-", source).strip("-").upper() or "EVENT"
-    if len(slug) > 48:
-        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:10].upper()
-        slug = f"{slug[:37]}-{digest}"
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:10].upper()
+    slug = f"{slug[:37]}-{digest}"
     return f"SUPP-AC-{year}-{state_code}-{slug}"
 
 
