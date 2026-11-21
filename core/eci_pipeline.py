@@ -190,7 +190,9 @@ def _party_abv(raw_party: str, existing: list[dict[str, Any]]) -> str:
     if not abv:
         abv = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8].upper()
     if any(str(row.get("abv") or "").casefold() == abv.casefold() for row in existing):
-        abv = re.sub(r"[^A-Z0-9]", "", raw.upper())[:8] or "UNK"
+        base = re.sub(r"[^A-Z0-9]", "", raw.upper())[:8] or "UNK"
+        suffix = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:4].upper()
+        abv = f"{base[:8]}{suffix}"
     return abv
 
 
@@ -230,7 +232,6 @@ def ingest_final_results(source_result: dict[str, Any], conn, cursor, is_pg: boo
 
         if not normalized:
             continue
-        winner = max(normalized, key=lambda item: item[2] + item[3])
         for candidate, party_abv, evm, postal in normalized:
             for round_no, vote_total in ((998, evm), (999, evm + postal)):
                 cursor.execute(
