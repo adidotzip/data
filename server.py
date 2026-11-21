@@ -97,6 +97,11 @@ class ScrapeRequest(BaseModel):
     respect: bool = False
 
 
+class ScrapeAllConfiguredRequest(BaseModel):
+    limit_per_state: int = Field(default=1000, ge=1, le=1000)
+    respect: bool = True
+
+
 class ScrapeAcRoundsRequest(BaseModel):
     url: str
     ac_no: int = Field(ge=1)
@@ -892,30 +897,81 @@ def download_dataset(
 
 @app.post("/scrape")
 def scrape_endpoint(request: ScrapeRequest):
-    """Scrape constituency summary pages from a validated ECI party-wise URL."""
-    from core.scraper import parse_partywise_url, scrape_constituency_sync
+    """Scrape one ECI state source and persist final EVM and EVM+postal snapshots."""
+    from core.eci_pipeline import scrape_partywise_source, ingest_final_results
 
     try:
-        election_identifier, state_code = parse_partywise_url(request.url)
+        scraped = scrape_partywise_source(request.url, limit=request.limit, respect=request.respect)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"message": str(exc), "source_url": request.url}) from exc
 
-    data = scrape_constituency_sync(
-        election_identifier,
-        state_code,
-        limit=request.limit,
-        respect_mode=request.respect,
-    )
-    if data.get("error"):
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "message": data["error"],
-                "source_url": data.get("source_url"),
-                "results_extracted": len(data.get("constituencywise_results", [])),
-            },
-        )
-    return {"status": "success", "data": data}
+    if not scraped.get("scraped"):
+        raise HTTPException(status_code=502, detail={
+            "message": "No constituency results were scraped; nothing was written to the database.",
+            "source_url": request.url,
+            "discovered": scraped.get("discovered_constituencies", 0),
+            "errors": scraped.get("errors", []),
+        })
+
+    conn = _connect()
+    cur = _cursor(conn)
+    try:
+        ingested = ingest_final_results(scraped, conn, cur, IS_PG)
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail={
+            "message": "Scraping succeeded but database ingestion failed. Database transaction rolled back.",
+            "source_url": request.url,
+            "scraped": scraped.get("scraped", 0),
+            "error": str(exc),
+        }) from exc
+    finally:
+        conn.close()
+
+    return {"status": "success", "data": scraped, "ingestion": ingested}
+
+
+@app.post("/scrape/all-configured")
+def scrape_all_configured_endpoint(request: ScrapeAllConfiguredRequest):
+    """Scrape every configured partywise ECI source from election.conf."""
+    from core.eci_pipeline import configured_partywise_urls, scrape_partywise_source, ingest_final_results
+
+    urls = configured_partywise_urls()
+    if not urls:
+        raise HTTPException(status_code=503, detail="No valid ECI source URLs are configured in election.conf.")
+
+    reports = []
+    totals = {"sources": len(urls), "scraped_constituencies": 0, "ingested_constituencies": 0, "candidate_snapshots_written": 0}
+    for url in urls:
+        report = {"url": url}
+        try:
+            scraped = scrape_partywise_source(url, limit=request.limit_per_state, respect=request.respect)
+            report.update({k: scraped.get(k) for k in ("state_code", "election_id", "discovered_constituencies", "attempted", "scraped", "errors")})
+            if scraped.get("scraped"):
+                conn = _connect()
+                cur = _cursor(conn)
+                try:
+                    ingestion = ingest_final_results(scraped, conn, cur, IS_PG)
+                except Exception as exc:
+                    conn.rollback()
+                    report["ingestion_error"] = str(exc)
+                finally:
+                    conn.close()
+                if "ingestion" in locals():
+                    report["ingestion"] = ingestion
+                    totals["ingested_constituencies"] += ingestion.get("constituencies_ingested", 0)
+                    totals["candidate_snapshots_written"] += ingestion.get("candidate_snapshots_written", 0)
+                    del ingestion
+            totals["scraped_constituencies"] += report.get("scraped", 0) or 0
+            report["status"] = "success" if report.get("scraped") else "failed"
+        except Exception as exc:
+            report["status"] = "failed"
+            report["error"] = str(exc)
+        reports.append(report)
+
+    return {"status": "success" if totals["ingested_constituencies"] else "partial_failure", "summary": totals, "sources": reports}
 
 
 @app.post("/scrape/ac-rounds")
