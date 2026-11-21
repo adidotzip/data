@@ -59,7 +59,7 @@ Election metadata used by the election selector and API.
 | `states` | TEXT | JSON array of state codes |
 | `sort_date` | TEXT | Sort key for election ordering |
 
-Metadata must correspond to available data. Live endpoints backed by `rounds_ac` are not election-ID scoped; they reject historical election metadata and direct historical queries to the archive API.
+Live election metadata uses ECI state codes (`Sxx`/`Uxx`). Archive rows use standard state codes (AS, KL, etc.) and must not be copied into this live selector table. Live endpoints backed by `rounds_ac` are not election-ID scoped; they expose only current-year general-election metadata. Historical queries use the archive API.
 
 ### historical_assembly_results
 
