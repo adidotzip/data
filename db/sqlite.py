@@ -329,7 +329,10 @@ def init_db():
                 ON historical_assembly_results (state_code, election_year);
         """
         if IS_PG:
-            cur.execute(historical_ddl)
+            for stmt in historical_ddl.strip().split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    cur.execute(stmt)
         else:
             cur.executescript(historical_ddl)
 
