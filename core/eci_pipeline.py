@@ -44,12 +44,39 @@ def configured_partywise_urls() -> list[str]:
 
 
 def _fetch_html(url: str) -> str:
-    html, status = _fetch_eci_html(url)
-    if status != 200:
-        raise RuntimeError(f"ECI returned HTTP {status} for {url}")
-    if not html or len(html.strip()) < 100:
-        raise RuntimeError(f"ECI returned an empty/short HTML response for {url}")
-    return html
+    """Fetch with curl first, falling back to Selenium for blocked/JS variants."""
+    primary_error = None
+    try:
+        html, status = _fetch_eci_html(url)
+        if status == 404:
+            raise RuntimeError(f"ECI page not found (HTTP 404): {url}")
+        if status == 200 and html and len(html.strip()) >= 100:
+            return html
+        primary_error = RuntimeError(f"curl returned HTTP {status} or an empty response")
+    except Exception as exc:
+        if "HTTP 404" in str(exc):
+            raise
+        primary_error = exc
+
+    try:
+        from core.browser import create_chrome_driver
+        driver = create_chrome_driver()
+        try:
+            driver.get(url)
+            title = (driver.title or "").lower()
+            body = (driver.find_element("tag name", "body").text or "").lower()
+            if "404" in title or "page not found" in body or "not found" in title:
+                raise RuntimeError(f"ECI page not found in Selenium fallback: {url}")
+            html = driver.page_source or ""
+            if len(html.strip()) < 100:
+                raise RuntimeError("Selenium returned an empty/short HTML response")
+            return html
+        finally:
+            driver.quit()
+    except Exception as fallback_error:
+        raise RuntimeError(
+            f"ECI fetch failed with curl ({primary_error}) and Selenium fallback ({fallback_error})"
+        ) from fallback_error
 
 
 def discover_constituencies(partywise_html: str, state_code: str) -> list[dict[str, Any]]:
