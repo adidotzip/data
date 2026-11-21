@@ -102,6 +102,12 @@ class ScrapeAllConfiguredRequest(BaseModel):
     respect: bool = True
 
 
+class ArchiveImportRequest(BaseModel):
+    state: Optional[str] = Field(default=None, description="Two-letter standard state code, e.g. MH, TN, WB")
+    year: Optional[int] = Field(default=None, ge=1951, le=2100)
+    dry_run: bool = False
+
+
 class ScrapeAcRoundsRequest(BaseModel):
     url: str
     ac_no: int = Field(ge=1)
@@ -978,6 +984,93 @@ def scrape_all_configured_endpoint(request: ScrapeAllConfiguredRequest):
     else:
         overall_status = "failed"
     return {"status": overall_status, "summary": totals, "sources": reports}
+
+
+@app.post("/archive/import")
+def import_archive_endpoint(request: ArchiveImportRequest):
+    """Import committed ECI archive JSON into the separate historical table."""
+    from core.archive_importer import import_archive_data
+
+    conn = _connect()
+    cur = _cursor(conn)
+    try:
+        result = import_archive_data(
+            conn, cur, IS_PG, state=request.state, year=request.year, dry_run=request.dry_run
+        )
+        return {"status": "dry_run" if request.dry_run else "success", "summary": result}
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Historical archive import failed: {exc}") from exc
+    finally:
+        conn.close()
+
+
+@app.get("/api/archive/elections")
+def historical_archive_elections():
+    """List imported historical election/state datasets and their coverage."""
+    conn = _connect()
+    cur = _cursor(conn)
+    try:
+        cur.execute("""
+            SELECT election_id, election_year, state_code,
+                   COUNT(DISTINCT ac_no) AS constituencies,
+                   COUNT(*) AS candidate_rows
+            FROM historical_assembly_results
+            GROUP BY election_id, election_year, state_code
+            ORDER BY election_year DESC, state_code
+        """)
+        rows = cur.fetchall()
+        datasets = [dict(row) if hasattr(row, "keys") else {
+            "election_id": row[0], "election_year": row[1], "state_code": row[2],
+            "constituencies": row[3], "candidate_rows": row[4]
+        } for row in rows]
+        return {"datasets": datasets, "dataset_count": len(datasets)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/archive/results")
+def historical_archive_results(
+    state: str = Query(default=None, description="Two-letter standard state code"),
+    year: int = Query(default=None, ge=1951, le=2100),
+    election_id: str = Query(default=None),
+    ac_no: int = Query(default=None, ge=1),
+    limit: int = Query(default=500, ge=1, le=10000),
+    offset: int = Query(default=0, ge=0),
+):
+    """Read historical candidate results without touching live rounds data."""
+    conn = _connect()
+    cur = _cursor(conn)
+    try:
+        clauses = []
+        params = []
+        p = "%s" if IS_PG else "?"
+        if state:
+            clauses.append(f"state_code={p}")
+            params.append(state.upper())
+        if year is not None:
+            clauses.append(f"election_year={p}")
+            params.append(year)
+        if election_id:
+            clauses.append(f"election_id={p}")
+            params.append(election_id)
+        if ac_no is not None:
+            clauses.append(f"ac_no={p}")
+            params.append(ac_no)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        cur.execute(f"SELECT COUNT(*) AS total FROM historical_assembly_results{where}", params)
+        total = (cur.fetchone() or {}).get("total", 0)
+        cur.execute(
+            f"""SELECT election_id, election_year, state_code, ac_no, ac_name,
+                       candidate, party_name, evm_votes, postal_votes, total_votes, source_url
+                FROM historical_assembly_results{where}
+                ORDER BY election_year DESC, state_code, ac_no, total_votes DESC, candidate
+                LIMIT {p} OFFSET {p}""",
+            params + [limit, offset],
+        )
+        return {"results": cur.fetchall(), "total": total, "limit": limit, "offset": offset}
+    finally:
+        conn.close()
 
 
 @app.post("/scrape/ac-rounds")
