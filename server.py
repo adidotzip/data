@@ -137,10 +137,16 @@ def _require_current_live_election(election: dict) -> None:
     elections = get_elections()
     latest_sort_date = max((str(item.get("sort_date", "")) for item in elections), default="")
     election_sort_date = str(election.get("sort_date", ""))
-    if not latest_sort_date or election_sort_date[:4] != latest_sort_date[:4]:
+    election_id = str(election.get("election_id", ""))
+    is_general_assembly_event = election_id.startswith("AC-")
+    if (
+        not latest_sort_date
+        or election_sort_date[:4] != latest_sort_date[:4]
+        or not is_general_assembly_event
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Historical elections cannot be queried through live endpoints. Use /api/archive/results.",
+            detail="Historical and by-election events cannot be queried through live endpoints. Use /api/archive/results.",
         )
 
 
