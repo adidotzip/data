@@ -308,6 +308,31 @@ def init_db():
         else:
             cur.executescript(ddl)
 
+        # Additive historical archive table. It is separate from live rounds_ac,
+        # so importing past elections cannot overwrite counting-day data.
+        historical_ddl = """
+            CREATE TABLE IF NOT EXISTS historical_assembly_results (
+                election_id TEXT NOT NULL,
+                election_year INTEGER NOT NULL,
+                state_code TEXT NOT NULL,
+                ac_no INTEGER NOT NULL,
+                ac_name TEXT,
+                candidate TEXT NOT NULL,
+                party_name TEXT NOT NULL DEFAULT '',
+                evm_votes INTEGER NOT NULL DEFAULT 0,
+                postal_votes INTEGER NOT NULL DEFAULT 0,
+                total_votes INTEGER NOT NULL DEFAULT 0,
+                source_url TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (election_id, state_code, ac_no, candidate, party_name)
+            );
+            CREATE INDEX IF NOT EXISTS historical_assembly_results_state_year_idx
+                ON historical_assembly_results (state_code, election_year);
+        """
+        if IS_PG:
+            cur.execute(historical_ddl)
+        else:
+            cur.executescript(historical_ddl)
+
         # Migrate older databases to the current verification schema.
         if IS_PG:
             cur.execute("ALTER TABLE constituency_status ADD COLUMN IF NOT EXISTS form20_score INTEGER DEFAULT NULL")
