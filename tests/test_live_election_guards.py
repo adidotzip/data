@@ -47,3 +47,16 @@ def test_live_election_guard_rejects_current_year_bye_election(monkeypatch):
 
     assert exc.value.status_code == 400
     assert "by-election" in exc.value.detail
+
+
+def test_live_election_list_hides_historical_and_bye_metadata(monkeypatch):
+    monkeypatch.setattr(server, "get_elections", lambda: [
+        {"election_id": "AC-2026-AS", "sort_date": "2026"},
+        {"election_id": "AC-2026-TN", "sort_date": "2026"},
+        {"election_id": "BYE-2026-10", "sort_date": "2026-10"},
+        {"election_id": "AC-2025-BR", "sort_date": "2025"},
+    ])
+
+    elections = server._current_live_elections()
+
+    assert [item["election_id"] for item in elections] == ["AC-2026-TN", "AC-2026-AS"]
