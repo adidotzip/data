@@ -34,3 +34,16 @@ def test_live_election_guard_rejects_when_metadata_empty(monkeypatch):
         server._require_current_live_election({"election_id": "AC-2026-AS", "sort_date": "2026"})
 
     assert exc.value.status_code == 400
+
+
+def test_live_election_guard_rejects_current_year_bye_election(monkeypatch):
+    monkeypatch.setattr(server, "get_elections", lambda: [
+        {"election_id": "AC-2026-AS", "sort_date": "2026"},
+        {"election_id": "BYE-2026-10", "sort_date": "2026-10"},
+    ])
+
+    with pytest.raises(HTTPException) as exc:
+        server._require_current_live_election({"election_id": "BYE-2026-10", "sort_date": "2026-10"})
+
+    assert exc.value.status_code == 400
+    assert "by-election" in exc.value.detail
