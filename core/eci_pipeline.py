@@ -90,7 +90,12 @@ def discover_by_election_constituencies(index_html: str, election_id: str) -> li
         )
         if not re.search(r"Constituencywise", target_path, re.IGNORECASE):
             target_path = f"Constituencywise{eci_state_code}{ac_no}.htm"
-        target_url = target_path if target_path.startswith("https://") else base + target_path.lstrip("./")
+        if target_path.startswith("https://"):
+            target_url = target_path
+        elif target_path.startswith("/"):
+            target_url = "https://results.eci.gov.in" + target_path
+        else:
+            target_url = base + target_path.lstrip("./")
         state_name = get_state_name(eci_state_code)
         normalized_state = get_state_code(state_name)
         if not normalized_state:
