@@ -127,23 +127,38 @@ class ScrapeAllRoundsRequest(BaseModel):
     respect: bool = False
 
 
-def _require_current_live_election(election: dict) -> None:
-    """Reject historical election metadata for endpoints backed by live rounds tables.
+def _current_live_elections() -> list[dict]:
+    """Return only current-year general assembly elections for live endpoints.
 
-    Historical candidate-level data is served by /api/archive/results. The live
-    rounds tables are not election-ID scoped, so filtering them by state alone
-    would incorrectly present current results as historical results.
+    Archive metadata may also exist in the elections table. Historical data has
+    its own /api/archive/elections and /api/archive/results endpoints.
     """
     elections = get_elections()
-    latest_sort_date = max((str(item.get("sort_date", "")) for item in elections), default="")
-    election_sort_date = str(election.get("sort_date", ""))
-    election_id = str(election.get("election_id", ""))
-    is_general_assembly_event = election_id.startswith("AC-")
-    if (
-        not latest_sort_date
-        or election_sort_date[:4] != latest_sort_date[:4]
-        or not is_general_assembly_event
-    ):
+    general_elections = [
+        item for item in elections
+        if str(item.get("election_id", "")).startswith("AC-")
+    ]
+    latest_year = max(
+        (str(item.get("sort_date", ""))[:4] for item in general_elections),
+        default="",
+    )
+    if not latest_year:
+        return []
+    return sorted(
+        [item for item in general_elections if str(item.get("sort_date", ""))[:4] == latest_year],
+        key=lambda item: (str(item.get("sort_date", "")), str(item.get("election_id", ""))),
+        reverse=True,
+    )
+
+
+def _require_current_live_election(election: dict) -> None:
+    """Reject elections not exposed by the live selector.
+
+    Live rounds are not election-ID scoped, so only the current general election
+    metadata is permitted. Historical and by-election data use the archive API.
+    """
+    current_ids = {str(item.get("election_id", "")) for item in _current_live_elections()}
+    if str(election.get("election_id", "")) not in current_ids:
         raise HTTPException(
             status_code=400,
             detail="Historical and by-election events cannot be queried through live endpoints. Use /api/archive/results.",
@@ -735,17 +750,15 @@ def constituency_rounds(state_code: str, ac_no: int):
 # ---------------------------------------------------------------------------
 @app.get("/api/elections")
 def list_elections():
-    """List all elections ordered by sort_date descending."""
-    return {"elections": get_elections()}
+    """List current-year general elections available to live endpoints."""
+    return {"elections": _current_live_elections()}
 
 
 @app.get("/api/elections/current")
 def current_election():
-    """Get the current (most recent) election."""
-    election = get_current_election()
-    if not election:
-        return {"election": None}
-    return {"election": election}
+    """Get the most recent current-year general election."""
+    elections = _current_live_elections()
+    return {"election": elections[0] if elections else None}
 
 
 @app.get("/api/states")
