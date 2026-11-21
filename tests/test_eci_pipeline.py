@@ -1,6 +1,11 @@
 import unittest
 
-from core.eci_pipeline import discover_constituencies, configured_partywise_urls
+from core.eci_pipeline import (
+    discover_constituencies,
+    discover_by_election_constituencies,
+    configured_partywise_urls,
+    parse_eci_index_url,
+)
 from core.scraper import parse_partywise_url
 
 
@@ -32,12 +37,39 @@ class EciPipelineTests(unittest.TestCase):
         self.assertEqual(election_id, "ResultAcGenMay2026")
         self.assertEqual(state_code, "S03")
 
+    def test_parse_official_by_election_index_url(self):
+        election_id = parse_eci_index_url(
+            "https://results.eci.gov.in/ResultAcByeOct2026/index.htm"
+        )
+        self.assertEqual(election_id, "ResultAcByeOct2026")
+
+    def test_discover_mixed_state_by_election_links(self):
+        html = """
+        <a href="candidateswise-U079.htm">Thattanchavady</a>
+        <a href="candidateswise-S2235.htm">Madurantakam</a>
+        <a href="candidateswise-S22101.htm">Dharapuram</a>
+        <a href="candidateswise-S2570.htm">Rejinagar</a>
+        <a href="candidateswise-S25210.htm">Nandigram</a>
+        """
+        found = discover_by_election_constituencies(html, "ResultAcByeOct2026")
+        self.assertEqual(
+            [(row["eci_state_code"], row["ac_no"], row["state_code"]) for row in found],
+            [("U07", 9, "PY"), ("S22", 35, "TN"), ("S22", 101, "TN"),
+             ("S25", 70, "WB"), ("S25", 210, "WB")],
+        )
+        self.assertEqual(found[0]["url"],
+            "https://results.eci.gov.in/ResultAcByeOct2026/ConstituencywiseU079.htm")
+        self.assertEqual(found[1]["url"],
+            "https://results.eci.gov.in/ResultAcByeOct2026/ConstituencywiseS2235.htm")
+
     def test_configured_sources_are_valid_and_deduplicated(self):
         urls = configured_partywise_urls()
-        self.assertTrue(urls)
+        self.assertEqual(urls, [
+            "https://results.eci.gov.in/ResultAcByeOct2026/index.htm"
+        ])
         self.assertEqual(len(urls), len(set(urls)))
         for url in urls:
-            parse_partywise_url(url)
+            parse_eci_index_url(url)
 
 
 if __name__ == "__main__":

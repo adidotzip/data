@@ -20,13 +20,36 @@ from core.scraper import (
     _parse_eci_constituency_html,
     build_constituency_url,
     parse_partywise_url,
+    get_state_code,
+    get_state_name,
 )
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "election.conf"
 
 
+def parse_eci_index_url(url: str) -> str:
+    """Validate an official ECI assembly by-election index URL and return its directory."""
+    match = re.fullmatch(
+        r"https://results\.eci\.gov\.in/([^/]+)/(?:index\.htm|index\.html)",
+        url.strip(),
+        flags=re.IGNORECASE,
+    )
+    if not match or "ResultAcBye" not in match.group(1):
+        raise ValueError("Expected an official ECI assembly by-election index URL ending in /index.htm")
+    return match.group(1)
+
+
+def _validate_eci_source_url(url: str) -> tuple[str, str]:
+    """Accept legacy partywise pages or official assembly by-election index pages."""
+    try:
+        return parse_partywise_url(url)
+    except ValueError:
+        election_id = parse_eci_index_url(url)
+        return election_id, "MIXED"
+
+
 def configured_partywise_urls() -> list[str]:
-    """Return valid, configured ECI partywise URLs, deduplicated."""
+    """Return configured ECI sources (partywise pages or by-election indexes)."""
     urls: list[str] = []
     if not CONFIG_PATH.exists():
         return urls
@@ -35,12 +58,56 @@ def configured_partywise_urls() -> list[str]:
         if not url or url.startswith("#"):
             continue
         try:
-            parse_partywise_url(url)
+            _validate_eci_source_url(url)
         except ValueError:
             continue
         if url not in urls:
             urls.append(url)
     return urls
+
+
+def discover_by_election_constituencies(index_html: str, election_id: str) -> list[dict[str, Any]]:
+    """Discover ACs from ECI by-election index links, including mixed states."""
+    soup = BeautifulSoup(index_html, "html.parser")
+    found: dict[tuple[str, int], dict[str, Any]] = {}
+    pattern = re.compile(
+        r"(?:candidateswise|Constituencywise)(?:-)?([SU]\d{2})(\d+)\.htm",
+        re.IGNORECASE,
+    )
+    base = f"https://results.eci.gov.in/{election_id}/"
+    for anchor in soup.find_all("a", href=True):
+        href = str(anchor["href"])
+        match = pattern.search(href)
+        if not match:
+            continue
+        eci_state_code = match.group(1).upper()
+        ac_no = int(match.group(2))
+        target_path = re.sub(
+            r"candidateswise-?([SU]\d{2})(\d+)\.htm",
+            r"Constituencywise\1\2.htm",
+            href,
+            flags=re.IGNORECASE,
+        )
+        if not re.search(r"Constituencywise", target_path, re.IGNORECASE):
+            target_path = f"Constituencywise{eci_state_code}{ac_no}.htm"
+        if target_path.startswith("https://"):
+            target_url = target_path
+        elif target_path.startswith("/"):
+            target_url = "https://results.eci.gov.in" + target_path
+        else:
+            target_url = base + target_path.lstrip("./")
+        state_name = get_state_name(eci_state_code)
+        normalized_state = get_state_code(state_name)
+        if not normalized_state:
+            raise ValueError(f"Could not map ECI state code {eci_state_code} to database state code")
+        found[(eci_state_code, ac_no)] = {
+            "ac_no": ac_no,
+            "eci_state_code": eci_state_code,
+            "state_code": normalized_state,
+            "ac_name": anchor.get_text(" ", strip=True) or f"AC-{ac_no}",
+            "url": target_url,
+        }
+    return sorted(found.values(), key=lambda row: (row["state_code"], row["ac_no"]))
 
 
 def _fetch_html(url: str) -> str:
@@ -112,8 +179,8 @@ def discover_constituencies(partywise_html: str, state_code: str) -> list[dict[s
     return [{"ac_no": no, "ac_name": name} for no, name in sorted(found.items())]
 
 
-def _scrape_one(election_id: str, state_code: str, ac_no: int) -> dict[str, Any]:
-    url = build_constituency_url(election_id, state_code, ac_no)
+def _scrape_one_url(url: str, ac_no: int, state_code: str) -> dict[str, Any]:
+    """Scrape one discovered ECI constituency result URL."""
     html = _fetch_html(url)
     parsed = _parse_eci_constituency_html(html, ac_no)
     if parsed.get("not_found"):
@@ -121,45 +188,67 @@ def _scrape_one(election_id: str, state_code: str, ac_no: int) -> dict[str, Any]
     rows = parsed.get("voting_tally") or []
     if not rows:
         raise RuntimeError(f"No candidate rows parsed for AC {ac_no}")
-    return {"source_url": url, "voting_data": parsed}
+    return {"source_url": url, "state_code": state_code, "voting_data": parsed}
+
+
+def _scrape_one(election_id: str, state_code: str, ac_no: int) -> dict[str, Any]:
+    normalized_state = get_state_code(get_state_name(state_code)) or state_code
+    url = build_constituency_url(election_id, state_code, ac_no)
+    return _scrape_one_url(url, ac_no, normalized_state)
 
 
 def scrape_partywise_source(url: str, limit: int = 1000, respect: bool = True,
                             max_workers: int = 3) -> dict[str, Any]:
-    """Discover ACs from one validated partywise page, scrape them, and report failures."""
-    election_id, state_code = parse_partywise_url(url)
+    """Scrape partywise pages or discover constituencies from an ECI bye-election index."""
+    election_id, state_code = _validate_eci_source_url(url)
+    is_index = state_code == "MIXED"
     page = _fetch_html(url)
-    acs = discover_constituencies(page, state_code)
+    if is_index:
+        acs = discover_by_election_constituencies(page, election_id)
+    else:
+        normalized_state = get_state_code(get_state_name(state_code)) or state_code
+        acs = [
+            {
+                **item,
+                "state_code": normalized_state,
+                "url": build_constituency_url(election_id, state_code, item["ac_no"]),
+            }
+            for item in discover_constituencies(page, state_code)
+        ]
     if not acs:
-        raise RuntimeError(f"Could not discover constituency list from party-wise source: {url}")
+        raise RuntimeError(f"Could not discover constituency list from ECI source: {url}")
     selected = acs[:limit]
     workers = 1 if respect else max(1, min(max_workers, 3))
     results: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
 
+    def scrape_item(item: dict[str, Any]) -> dict[str, Any]:
+        return _scrape_one_url(item["url"], item["ac_no"], item["state_code"])
+
     if workers == 1:
         for item in selected:
             try:
-                results.append(_scrape_one(election_id, state_code, item["ac_no"]))
+                results.append(scrape_item(item))
             except Exception as exc:
-                errors.append({"ac_no": item["ac_no"], "error": str(exc)})
+                errors.append({"state_code": item["state_code"], "ac_no": item["ac_no"], "error": str(exc)})
             if respect:
                 time.sleep(random.uniform(0.8, 1.5))
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_scrape_one, election_id, state_code, item["ac_no"]): item for item in selected}
+            futures = {pool.submit(scrape_item, item): item for item in selected}
             for future in as_completed(futures):
                 item = futures[future]
                 try:
                     results.append(future.result())
                 except Exception as exc:
-                    errors.append({"ac_no": item["ac_no"], "error": str(exc)})
+                    errors.append({"state_code": item["state_code"], "ac_no": item["ac_no"], "error": str(exc)})
                 time.sleep(random.uniform(0.3, 0.8))
 
-    results.sort(key=lambda r: int(r["voting_data"]["constituency_no"]))
+    results.sort(key=lambda r: (r.get("state_code", ""), int(r["voting_data"]["constituency_no"])))
     return {
         "election_id": election_id,
-        "state_code": state_code,
+        "state_code": "MIXED" if is_index else get_state_code(get_state_name(state_code)) or state_code,
+        "source_type": "assembly_by_election_index" if is_index else "partywise",
         "source_url": url,
         "discovered_constituencies": len(acs),
         "attempted": len(selected),
@@ -207,7 +296,7 @@ def ingest_final_results(source_result: dict[str, Any], conn, cursor, is_pg: boo
     for entry in source_result.get("constituencywise_results", []):
         data = entry.get("voting_data", {})
         ac_no = int(data.get("constituency_no") or 0)
-        state_code = source_result["state_code"]
+        state_code = entry.get("state_code") or source_result["state_code"]
         ac_name = str(data.get("constituency") or f"AC-{ac_no}")
         candidates = data.get("voting_tally") or []
         if ac_no <= 0 or not candidates:
@@ -257,7 +346,6 @@ def ingest_final_results(source_result: dict[str, Any], conn, cursor, is_pg: boo
 
     conn.commit()
     return {"constituencies_ingested": processed_acs, "candidate_snapshots_written": inserted_candidates}
-
 
 def ingest_round_results(state_code: str, ac_no: int, ac_name: str, rounds: list,
                         postal_votes: list, conn, cursor, is_pg: bool) -> dict[str, int]:
