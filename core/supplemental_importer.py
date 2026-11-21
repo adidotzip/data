@@ -208,7 +208,7 @@ def import_supplemental_archive(conn, cursor, is_pg: bool, *,
     sql = f"""INSERT INTO historical_assembly_results
         (election_id, election_year, state_code, ac_no, ac_name, candidate,
          party_name, evm_votes, postal_votes, total_votes, source_url)
-        VALUES ({','.join([placeholder] * 11)}
+        VALUES ({','.join([placeholder] * 11)})
         ON CONFLICT (election_id, state_code, ac_no, candidate, party_name)
         DO NOTHING"""
     try:
