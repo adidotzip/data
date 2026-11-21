@@ -393,7 +393,37 @@ Optional filters: `state` (standard two-letter code) and `year`. The import is a
 
 Historical API:
 - `GET /api/archive/elections` — imported dataset coverage by election/state.
-- `GET /api/archive/results?state=TN&year=2026` — candidate vote totals for a state/year. Supports `election_id`, `ac_no`, `limit` (max 10,000), and `offset`.
+- `GET /api/archive/results?state=TN&year=2026` — candidate vote totals for a state/year. Supports `election_id` and `ac_no`; returns all matching rows.
+
+### Supplemental historical coverage (2009–2026)
+
+A supplementary candidate-level Parquet dataset is available from [skthewimp/elections](https://github.com/skthewimp/elections). It contains 161,760 rows across 119 election IDs. Its provenance varies by period and is retained in the supplemental row's `source_url`. Existing archive records are never overwritten: conflicting primary-key rows are skipped, while missing rows may be filled.
+
+Preview before writing (dry-run defaults to true):
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/archive/import-supplemental \
+  -H 'Content-Type: application/json' \
+  -d '{"dry_run":true}'
+```
+
+Filter the preview to a state/year:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/archive/import-supplemental \
+  -H 'Content-Type: application/json' \
+  -d '{"state":"CG","year":2018,"dry_run":true}'
+```
+
+Only after reviewing the preview, import:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/archive/import-supplemental \
+  -H 'Content-Type: application/json' \
+  -d '{"dry_run":false}'
+```
+
+The importer downloads the Parquet source to a temporary cache, maps state names to standard codes, reuses existing election IDs when state/year already exist, and otherwise creates stable `SUPP-AC-YYYY-ST` IDs. It uses conflict-ignore inserts and never deletes or updates existing archive rows. The source file is cached under the server's temporary directory.
 
 ### Coverage boundaries
 
